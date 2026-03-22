@@ -1,0 +1,23 @@
+{
+  "name": "firehose",
+  "module": "index.ts",
+  "main": "index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run index.ts",
+    "start": "bun run index.ts",
+    "cli": "node cli.js",
+    "test": "bun test",
+    "typecheck": "bun x tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.0.12"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "cbor": "^9.0.2",
+    "ws": "^8.17.1"
+  }
+}

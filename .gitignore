@@ -1,0 +1,50 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage
+.nyc_output
+
+# Dependency directories
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+out/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Package manager caches
+.npm
+.eslintcache
+.parcel-cache
+.turbo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Editors and OS files
+.DS_Store
+.vscode/
+.idea/
+
+# Bun
+.bun/

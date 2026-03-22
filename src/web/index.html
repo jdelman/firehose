@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bluesky Stream</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="toolbar">
+        <form id="filter-form" class="filter-form">
+          <label for="filter-input">Firehose</label>
+          <div id="filter-chips" class="filter-chips" aria-live="polite"></div>
+          <input id="filter-input" name="filter" type="text" placeholder="oscars" />
+          <button id="stream-toggle-button" type="button">play</button>
+          <button id="clear-app-button" type="button">clear</button>
+          <label class="toolbar-toggle" for="sound-mode">
+            <input id="sound-mode" type="checkbox" />
+            <span>Sound mode</span>
+          </label>
+          <button id="theme-button" type="button">Dark mode</button>
+        </form>
+      </header>
+      <main class="layout">
+        <section class="posts-panel">
+          <div class="panel-header">
+            <h1>Posts</h1>
+            <div class="panel-controls">
+              <label class="pin-toggle" for="pin-to-bottom">
+                <input id="pin-to-bottom" type="checkbox" checked />
+                <span>Pin to bottom</span>
+              </label>
+              <span id="connection-state" class="pill">Disconnected</span>
+            </div>
+          </div>
+          <div id="posts" class="posts"></div>
+        </section>
+        <aside class="summary-panel">
+          <div class="panel-header">
+            <h2>Live Summary</h2>
+            <span id="current-filter" class="pill">all</span>
+          </div>
+          <section class="summary-card">
+            <div class="summary-meta">
+              <span class="stat-label">Summary</span>
+              <span id="summary-status" class="summary-state">idle</span>
+            </div>
+            <p id="summary-text">Waiting for the first 10-second window.</p>
+          </section>
+          <div class="summary-data-grid">
+            <section class="summary-card">
+              <div class="summary-meta">
+                <span class="stat-label">Top bigrams</span>
+                <button id="clear-bigrams-button" class="small-button" type="button">clear</button>
+              </div>
+              <ol id="bigrams-list" class="bigrams-list"></ol>
+            </section>
+            <section class="summary-card">
+              <div class="summary-meta">
+                <span class="stat-label">Keywords</span>
+              </div>
+              <ol id="keywords-list" class="keywords-list"></ol>
+            </section>
+          </div>
+        </aside>
+      </main>
+    </div>
+    <footer class="status-bar">
+      <div class="status-grid">
+        <div class="status-item">
+          <span class="status-label">Posts/sec</span>
+          <strong id="posts-per-second">0.00</strong>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Total posts</span>
+          <strong id="total-posts">0</strong>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Subscribers</span>
+          <strong id="subscriber-count">0</strong>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Summary age</span>
+          <strong id="summary-age">never</strong>
+        </div>
+      </div>
+      <div class="status-system">
+        <span id="system-message">Ready.</span>
+      </div>
+    </footer>
+    <script type="module" src="/web/app.js"></script>
+  </body>
+</html>
