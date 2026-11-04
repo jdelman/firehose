@@ -22,8 +22,8 @@ function varint(value: number): Buffer {
   return Buffer.from(bytes);
 }
 
-async function frame(did: string, text = 'hello', langs = ['en']): Promise<Buffer> {
-  const record = await cbor.encodeAsync({ $type: 'app.bsky.feed.post', text, langs, createdAt: new Date().toISOString() });
+async function frame(did: string, text = 'hello', langs = ['en'], embed?: unknown): Promise<Buffer> {
+  const record = await cbor.encodeAsync({ $type: 'app.bsky.feed.post', text, langs, createdAt: new Date().toISOString(), ...(embed ? { embed } : {}) });
   const cid = Buffer.concat([Buffer.from([18, 32]), Buffer.alloc(32)]);
   const header = await cbor.encodeAsync({ version: 1, roots: [] });
   const blocks = Buffer.concat([varint(header.length), header, varint(cid.length + record.length), cid, record]);
@@ -57,6 +57,41 @@ async function fixture(fetcher: typeof fetch = (async () => Response.json({})) a
 }
 
 describe('Bluesky firehose recovery and delivery', () => {
+  test('delivers images from binary firehose CIDs, quote-with-media embeds, and JSON blob references', async () => {
+    const f = await fixture();
+    const did = 'did:plc:image-fixture';
+    const cid = 'bafkreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const binaryRef = () => new cbor.Tagged(42, Buffer.from([0, 1, 85, 18, 32, ...new Uint8Array(32)]));
+    const imageEmbed = (image: unknown) => ({
+      $type: 'app.bsky.embed.images', images: [{ alt: 'A cat wearing a hat', image }],
+    });
+    const embeds = [
+      imageEmbed({ $type: 'blob', ref: binaryRef(), mimeType: 'image/jpeg', size: 123 }),
+      { $type: 'app.bsky.embed.recordWithMedia', media: imageEmbed({ ref: binaryRef() }) },
+      imageEmbed({ ref: { $link: cid } }),
+      imageEmbed({ cid, mimeType: 'image/jpeg' }),
+      imageEmbed({ ref: new cbor.Tagged(42, Buffer.from([0, 255])) }),
+      imageEmbed({ ref: new cbor.Tagged(42, Buffer.from([1, 1, 85, 18, 32, ...new Uint8Array(32)])) }),
+    ];
+    try {
+      f.source.start();
+      await until(() => f.connections.length === 1);
+      for (let index = 0; index < embeds.length; index++) {
+        f.connections[0]!.send(await frame(did, `photo ${index}`, ['en'], embeds[index]));
+      }
+      await until(() => f.posts.length === embeds.length);
+      for (const post of f.posts.slice(0, 4)) {
+        expect(post.images).toEqual([{
+          url: `https://cdn.bsky.app/img/feed_fullsize/plain/did%3Aplc%3Aimage-fixture/${cid}@jpeg`,
+          alt: 'A cat wearing a hat',
+        }]);
+      }
+      expect(f.posts[4]!.images).toBeUndefined();
+      expect(f.posts[5]!.images).toBeUndefined();
+      expect(f.messages.some(message => message.startsWith('Firehose message error'))).toBe(false);
+    } finally { await f.close(); }
+  });
+
   test('reconnects after an abnormal close and resumes delivering posts', async () => {
     const f = await fixture();
     try {

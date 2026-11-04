@@ -1,10 +1,12 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "firehose",
       "dependencies": {
         "cbor": "^9.0.2",
+        "multiformats": "^14.0.5",
         "ws": "^8.17.1",
       },
       "devDependencies": {
@@ -25,6 +27,8 @@
     "bun-types": ["bun-types@1.0.36", "", { "dependencies": { "@types/node": "~20.11.3", "@types/ws": "~8.5.10" } }, "sha512-gaIb1SyhB0JZfIEg73/kSFhqolUqJXC68peguhXGwqr27HuvI8nkD0LTIHp/1DY4cNadfXHYgYrZIWX7oEoXlg=="],
 
     "cbor": ["cbor@9.0.2", "", { "dependencies": { "nofilter": "^3.1.0" } }, "sha512-JPypkxsB10s9QOWwa6zwPzqE1Md3vqpPc+cai4sAecuCsRyAtAl/pMyhPlMbT/xtPnm2dznJZYRLui57qiRhaQ=="],
+
+    "multiformats": ["multiformats@14.0.5", "", {}, "sha512-vbIm83F2yZ1pWJGS0yl0ysracIvv56LtbrIyiIQHoLdYDJOMoLfVFsXhh9DUH4SFdkdkFhucyWniihsNzVEjkQ=="],
 
     "nofilter": ["nofilter@3.1.0", "", {}, "sha512-l2NNj07e9afPnhAhvgVrCD/oy2Ai1yfLpuo3EpiO1jFTsB4sFz6oIfAfSZyQzVpkZQ9xS8ZS5g1jCBgq4Hwo0g=="],
 

@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "cbor": "^9.0.2",
+    "multiformats": "^14.0.5",
     "ws": "^8.17.1"
   }
 }

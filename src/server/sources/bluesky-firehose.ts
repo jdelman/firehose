@@ -1,4 +1,6 @@
 import cbor from 'cbor';
+import { CID } from 'multiformats/cid';
+import { base32 } from 'multiformats/bases/base32';
 import WebSocket from 'ws';
 
 import { logBlueskyEvent } from '../logger.ts';
@@ -281,9 +283,8 @@ type BlueskyFacet = {
 };
 
 type BlueskyBlobRef = {
-  ref?: {
-    $link?: string;
-  };
+  ref?: { $link?: string } | cbor.Tagged;
+  cid?: string;
 };
 
 type BlueskyImageEmbed = {
@@ -459,7 +460,7 @@ function extractImages(post: BlueskyPostRecord, did: string): PostImage[] | unde
 
   const images = imageEmbed.images
     .map((image) => {
-      const cid = image.image?.ref?.$link;
+      const cid = imageCid(image.image);
       if (!cid) {
         return null;
       }
@@ -472,6 +473,24 @@ function extractImages(post: BlueskyPostRecord, did: string): PostImage[] | unde
     .filter((image): image is PostImage => Boolean(image));
 
   return images.length > 0 ? images : undefined;
+}
+
+/** Repo frames use DAG-CBOR tag 42; JSON API records use $link or legacy cid. */
+function imageCid(blob?: BlueskyBlobRef): string | undefined {
+  if (!blob) return undefined;
+  try {
+    const ref = blob.ref;
+    if (ref instanceof cbor.Tagged) {
+      const bytes: unknown = ref.value;
+      if (ref.tag !== 42 || !(bytes instanceof Uint8Array) || bytes[0] !== 0) return undefined;
+      return CID.parse(base32.encode(bytes.subarray(1))).toString();
+    }
+    const cid = ref?.$link ?? blob.cid;
+    return typeof cid === 'string' ? CID.parse(cid).toString() : undefined;
+  } catch {
+    // A bad attachment must not discard the post or its other images.
+    return undefined;
+  }
 }
 
 function unwrapImageEmbed(embed?: BlueskyEmbed): BlueskyImageEmbed | undefined {
