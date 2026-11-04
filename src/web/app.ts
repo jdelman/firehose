@@ -18,6 +18,7 @@ const SUMMARY_AGE_CYCLE_MS = 10_000;
 const PIN_TO_BOTTOM_STORAGE_KEY = 'bluesky.pinToBottom';
 const THEME_STORAGE_KEY = 'bluesky.theme';
 const SOURCES_STORAGE_KEY = 'bluesky.sources';
+const SHOW_IMAGES_STORAGE_KEY = 'bluesky.showImages';
 type Theme = SoundTheme;
 
 function parseTheme(value: string | null): Theme {
@@ -44,6 +45,7 @@ const elements = {
   settingsClose: document.querySelector<HTMLButtonElement>('#settings-close'),
   modeSelect: document.querySelector<HTMLSelectElement>('#mode-select'),
   themeSelect: document.querySelector<HTMLSelectElement>('#theme-select'),
+  showImages: document.querySelector<HTMLInputElement>('#show-images'),
   pinToBottom: document.querySelector<HTMLInputElement>('#pin-to-bottom'),
   posts: document.querySelector<HTMLDivElement>('#posts'),
   connectionState: document.querySelector<HTMLElement>('#connection-state'),
@@ -99,6 +101,7 @@ let currentPostsPerSecond = 0;
 let pendingStats: ChannelStats | null = null;
 let postFragment: DocumentFragment | null = null;
 const authorNames = new Map<string, string>();
+const postImages = new WeakMap<HTMLElement, GenericPost['images']>();
 let authorsDirty = false;
 const postQueue = new RenderQueue<GenericPost>(renderQueuedPost, commitRenderedPosts, MAX_POSTS);
 let rateHistory: Array<{ second: number; rate: number }> = [];
@@ -402,7 +405,8 @@ function renderQueuedPost(post: GenericPost) {
   article.append(createPostMeta(post));
   article.append(createPostBody(post));
 
-  const imageGallery = createPostImages(post);
+  postImages.set(article, post.images);
+  const imageGallery = createPostImages(post.images);
   if (imageGallery) {
     article.append(imageGallery);
   }
@@ -531,6 +535,30 @@ function persistSourcesPreference() {
   } catch {
     // Ignore storage failures and keep the in-memory setting.
   }
+}
+
+function loadShowImagesPreference(): boolean {
+  try {
+    return window.localStorage.getItem(SHOW_IMAGES_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function updateShowImages() {
+  const enabled = elements.showImages!.checked;
+  try {
+    window.localStorage.setItem(SHOW_IMAGES_STORAGE_KEY, String(enabled));
+  } catch {
+    // Keep the current setting when storage is unavailable.
+  }
+  crazyMode.clearOverlay();
+  for (const article of Array.from(elements.posts!.children) as HTMLElement[]) {
+    article.querySelector('.post-images')?.remove();
+    const gallery = createPostImages(postImages.get(article));
+    if (gallery) article.append(gallery);
+  }
+  if (isPinnedToBottom()) elements.posts!.scrollTop = elements.posts!.scrollHeight;
 }
 
 function loadThemePreference(): Theme {
@@ -811,15 +839,15 @@ function createPostBody(post: GenericPost): HTMLElement {
   return paragraph;
 }
 
-function createPostImages(post: GenericPost): HTMLElement | null {
-  if (!post.images?.length) {
+function createPostImages(images: GenericPost['images']): HTMLElement | null {
+  if (!elements.showImages!.checked || !images?.length) {
     return null;
   }
 
   const gallery = document.createElement('div');
   gallery.className = 'post-images';
 
-  for (const image of post.images) {
+  for (const image of images) {
     const link = document.createElement('a');
     link.className = 'post-image-link';
     link.href = image.url;
@@ -1049,6 +1077,8 @@ function init() {
     });
   }
   elements.pinToBottom!.checked = loadPinToBottomPreference();
+  elements.showImages!.checked = loadShowImagesPreference();
+  elements.showImages!.addEventListener('change', updateShowImages);
   const initialFilters = getFiltersFromUrl();
   const initialOptions = readViewOptions(new URLSearchParams(window.location.search), {
     play: initialFilters.length > 0,
