@@ -1,25 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-enable-x="false">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Bluesky Stream</title>
+    <title>Firehose — Bluesky + X</title>
     <link rel="stylesheet" href="/web/styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <header class="toolbar">
         <form id="filter-form" class="filter-form">
-          <label for="filter-input">Firehose</label>
+          <input id="filter-input" name="filter" type="text" placeholder="oscars" aria-label="Add a filter" />
+          <button id="stream-toggle-button" class="icon-button" type="button" aria-label="Play" title="Play" data-playing="false">
+            <svg class="play-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 4 14 8-14 8z" /></svg>
+            <svg class="pause-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg>
+          </button>
+          <button id="clear-app-button" class="icon-button" type="button" aria-label="Clear" title="Clear">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg>
+          </button>
+          <button id="settings-button" class="icon-button" type="button" aria-label="Settings" aria-haspopup="dialog" aria-controls="settings-dialog" title="Settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m9.5 3-.6 2.2-1.5.9-2.2-.6-2.5 4.3 1.6 1.6v1.8l-1.6 1.6 2.5 4.3 2.2-.6 1.5.9.6 2.2h5l.6-2.2 1.5-.9 2.2.6 2.5-4.3-1.6-1.6v-1.8l1.6-1.6-2.5-4.3-2.2.6-1.5-.9L14.5 3z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
           <div id="filter-chips" class="filter-chips" aria-live="polite"></div>
-          <input id="filter-input" name="filter" type="text" placeholder="oscars" />
-          <button id="stream-toggle-button" type="button">play</button>
-          <button id="clear-app-button" type="button">clear</button>
-          <label class="toolbar-toggle" for="sound-mode">
-            <input id="sound-mode" type="checkbox" />
-            <span>Sound mode</span>
-          </label>
-          <button id="theme-button" type="button">Dark mode</button>
         </form>
       </header>
       <main class="layout">
@@ -48,6 +53,13 @@
             </div>
             <p id="summary-text">Waiting for the first 10-second window.</p>
           </section>
+          <section id="source-comparison" class="summary-card" hidden aria-live="polite">
+            <div class="summary-meta">
+              <span class="stat-label">Bluesky vs X</span>
+              <span id="comparison-status" class="summary-state">waiting</span>
+            </div>
+            <p id="comparison-text">Waiting for recent posts from both sources.</p>
+          </section>
           <div class="summary-data-grid">
             <section class="summary-card">
               <div class="summary-meta">
@@ -66,11 +78,45 @@
         </aside>
       </main>
     </div>
+    <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title" aria-describedby="settings-description">
+      <div class="settings-header">
+        <h2 id="settings-title">Settings</h2>
+        <button id="settings-close" type="button" aria-label="Close settings" autofocus>Close</button>
+      </div>
+      <p id="settings-description" class="settings-description">Changes apply immediately and are saved on this device.</p>
+      <fieldset class="settings-sites">
+        <legend>Selected sites</legend>
+        <label class="toolbar-toggle"><input id="source-bluesky" type="checkbox" checked /> Bluesky</label>
+        <label id="source-x-toggle" class="toolbar-toggle" hidden><input id="source-x" type="checkbox" disabled /> X</label>
+        <span id="x-status" class="pill" aria-live="polite" hidden></span>
+      </fieldset>
+      <label class="toolbar-toggle" for="mode-select">
+        <span>Mode</span>
+        <select id="mode-select" name="mode">
+          <option value="off">Off</option>
+          <option value="sound">Sound mode</option>
+          <option value="crazy">Crazy mode</option>
+        </select>
+      </label>
+      <label class="toolbar-toggle" for="theme-select">
+        <span>Theme</span>
+        <select id="theme-select" name="theme">
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+          <option value="streamserver">Streamserver</option>
+        </select>
+      </label>
+    </dialog>
     <footer class="status-bar">
       <div class="status-grid">
         <div class="status-item">
           <span class="status-label">Posts/sec</span>
           <strong id="posts-per-second">0.00</strong>
+          <svg id="rate-sparkline" class="rate-sparkline" viewBox="0 0 72 20" role="img" aria-label="Posts per second history, last 60 seconds">
+            <title>Posts/sec over the last 60 seconds; vertical scale adjusts to the peak.</title>
+            <path class="sparkline-baseline" d="M1 19H71" />
+            <path id="rate-sparkline-path" d="" />
+          </svg>
         </div>
         <div class="status-item">
           <span class="status-label">Total posts</span>
@@ -83,6 +129,11 @@
         <div class="status-item">
           <span class="status-label">Summary age</span>
           <strong id="summary-age">never</strong>
+          <svg id="summary-age-timer" class="summary-age-timer" viewBox="0 0 20 20" aria-hidden="true">
+            <title>Summary age: fills over 10 seconds and resets when a new summary arrives.</title>
+            <circle class="summary-timer-track" cx="10" cy="10" r="8" />
+            <circle id="summary-age-progress" class="summary-timer-progress" cx="10" cy="10" r="8" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" />
+          </svg>
         </div>
       </div>
       <div class="status-system">

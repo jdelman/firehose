@@ -1,6 +1,16 @@
+export type SoundTheme = 'light' | 'dark' | 'streamserver';
+
+const MIN_SOUND_INTERVAL_SECONDS = 1 / 12;
+const PENTATONIC_NOTES = [523.25, 587.33, 659.25, 783.99, 880, 1046.5];
+
 export class AudioEngine {
   private context: AudioContext | null = null;
   private reverbBuffer: AudioBuffer | null = null;
+  private output: DynamicsCompressorNode | null = null;
+  private reverb: ConvolverNode | null = null;
+  private nextSoundAt = -Infinity;
+  private melodyStep = 0;
+  private spotlightBuffer: Promise<AudioBuffer | null> | null = null;
 
   async prime(): Promise<void> {
     const context = this.getContext();
@@ -13,7 +23,51 @@ export class AudioEngine {
     }
   }
 
-  async playClick(postsPerSecond = 0): Promise<void> {
+  async primeSpotlight(): Promise<void> {
+    const context = this.getContext();
+    if (!context) return;
+    // Start the download before waiting for a user gesture to unlock audio.
+    const loaded = this.loadSpotlight(context);
+    await this.prime();
+    await loaded;
+  }
+
+  async playSpotlight(): Promise<void> {
+    const context = this.getContext();
+    if (!context) return;
+    await this.prime();
+    const buffer = await this.loadSpotlight(context);
+    if (!buffer || context.state !== 'running') return;
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    source.buffer = buffer;
+    gain.gain.setValueAtTime(0.4, context.currentTime);
+    source.connect(gain);
+    gain.connect(this.getOutput(context).output);
+    source.addEventListener('ended', () => {
+      source.disconnect();
+      gain.disconnect();
+    }, { once: true });
+    source.start();
+  }
+
+  private loadSpotlight(context: AudioContext): Promise<AudioBuffer | null> {
+    if (!this.spotlightBuffer) {
+      this.spotlightBuffer = (async () => {
+        try {
+          const response = await fetch('/sounds/gunshot.m4a');
+          if (!response.ok) throw new Error('Spotlight sound unavailable');
+          return await context.decodeAudioData(await response.arrayBuffer());
+        } catch {
+          this.spotlightBuffer = null;
+          return null;
+        }
+      })();
+    }
+    return this.spotlightBuffer;
+  }
+
+  async playClick(postsPerSecond = 0, theme: SoundTheme = 'light'): Promise<void> {
     const context = this.getContext();
     if (!context) {
       return;
@@ -28,44 +82,83 @@ export class AudioEngine {
     }
 
     const now = context.currentTime;
+    // Coalesce bursts rather than queuing sounds that would play after the posts.
+    if (now < this.nextSoundAt) return;
+    this.nextSoundAt = now + MIN_SOUND_INTERVAL_SECONDS;
+    const { output, reverb } = this.getOutput(context);
     const oscillator = context.createOscillator();
     const dryGain = context.createGain();
     const wetGain = context.createGain();
-    const convolver = context.createConvolver();
-    const startFrequency = this.frequencyForRate(postsPerSecond);
-    const endFrequency = Math.max(startFrequency * 1.45, startFrequency + 250);
+    const rate = Math.max(0, Math.min(postsPerSecond, 8));
+    // Transpose by a frequency ratio so the pentatonic intervals stay intact.
+    const startFrequency = theme === 'streamserver'
+      ? this.nextMusicalFrequency() * 2 ** (rate / 8)
+      : theme === 'dark' ? 650 + rate * 70 : this.frequencyForRate(rate);
+    const endFrequency = theme === 'streamserver' ? startFrequency
+      : theme === 'dark' ? startFrequency * 1.08
+      : Math.max(startFrequency * 1.45, startFrequency + 250);
+    const decay = theme === 'streamserver' ? 0.085 : theme === 'dark' ? 0.035 : 0.024;
+    const filter = theme === 'dark' ? context.createBiquadFilter() : null;
+    if (filter) {
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1_000, now);
+      filter.Q.setValueAtTime(0.7, now);
+    }
 
-    oscillator.type = 'square';
+    oscillator.type = theme === 'streamserver' ? 'sine' : theme === 'dark' ? 'triangle' : 'square';
     oscillator.frequency.setValueAtTime(startFrequency, now);
     oscillator.frequency.exponentialRampToValueAtTime(endFrequency, now + 0.018);
 
     dryGain.gain.setValueAtTime(0.0001, now);
     dryGain.gain.exponentialRampToValueAtTime(0.04, now + 0.002);
-    dryGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.024);
+    dryGain.gain.exponentialRampToValueAtTime(0.0001, now + decay);
 
-    wetGain.gain.setValueAtTime(0.018, now);
-    convolver.buffer = this.getReverbBuffer(context);
+    wetGain.gain.setValueAtTime(theme === 'dark' ? 0.25 : 0.45, now);
 
-    oscillator.connect(dryGain);
-    dryGain.connect(context.destination);
+    const voice = filter ?? oscillator;
+    if (filter) oscillator.connect(filter);
+    voice.connect(dryGain);
+    dryGain.connect(output);
 
-    oscillator.connect(convolver);
-    convolver.connect(wetGain);
-    wetGain.connect(context.destination);
+    // Apply the same smooth envelope to the reverb input to avoid abrupt edges.
+    dryGain.connect(wetGain);
+    wetGain.connect(reverb);
 
     oscillator.start(now);
-    oscillator.stop(now + 0.03);
+    oscillator.stop(now + decay + 0.006);
 
     oscillator.addEventListener(
       'ended',
       () => {
         oscillator.disconnect();
+        filter?.disconnect();
         dryGain.disconnect();
-        convolver.disconnect();
         wetGain.disconnect();
       },
       { once: true },
     );
+  }
+
+  private getOutput(context: AudioContext): { output: DynamicsCompressorNode; reverb: ConvolverNode } {
+    if (!this.output) {
+      const output = context.createDynamicsCompressor();
+      output.threshold.setValueAtTime(-12, context.currentTime);
+      output.knee.setValueAtTime(3, context.currentTime);
+      output.ratio.setValueAtTime(12, context.currentTime);
+      output.attack.setValueAtTime(0.001, context.currentTime);
+      output.release.setValueAtTime(0.08, context.currentTime);
+      const master = context.createGain();
+      master.gain.setValueAtTime(0.8, context.currentTime);
+      output.connect(master);
+      master.connect(context.destination);
+      this.output = output;
+    }
+    if (!this.reverb) {
+      this.reverb = context.createConvolver();
+      this.reverb.buffer = this.getReverbBuffer(context);
+      this.reverb.connect(this.output);
+    }
+    return { output: this.output, reverb: this.reverb };
   }
 
   private getContext(): AudioContext | null {
@@ -83,6 +176,13 @@ export class AudioEngine {
     }
 
     return this.context;
+  }
+
+  private nextMusicalFrequency(): number {
+    const top = PENTATONIC_NOTES.length - 1;
+    const index = this.melodyStep <= top ? this.melodyStep : top * 2 - this.melodyStep;
+    this.melodyStep = (this.melodyStep + 1) % (top * 2);
+    return PENTATONIC_NOTES[index]!;
   }
 
   private frequencyForRate(postsPerSecond: number): number {

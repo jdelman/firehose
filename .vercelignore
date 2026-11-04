@@ -1,0 +1,11 @@
+.env
+.env.*
+.git
+.vercel
+.aws
+.agents
+.codex
+node_modules
+not
+test
+*.log

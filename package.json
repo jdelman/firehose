@@ -4,7 +4,7 @@
   "main": "index.ts",
   "type": "module",
   "scripts": {
-    "dev": "bun run index.ts",
+    "dev": "bun --hot index.ts",
     "start": "bun run index.ts",
     "cli": "node cli.js",
     "test": "bun test",

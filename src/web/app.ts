@@ -1,43 +1,90 @@
 import {
+  type AuthorUpdate,
   type BigramSnapshot,
   FilterStreamClient,
   type GenericPost,
   type ChannelStats,
   type SummarySnapshot,
 } from './stream-client.js';
-import { AudioEngine } from './audio-engine.js';
+import { AudioEngine, type SoundTheme } from './audio-engine.js';
+import { CrazyMode } from './crazy-mode.js';
+import { RenderQueue } from './render-queue.js';
+import { bindButtonActivation } from './button-activation.js';
+import { readViewOptions, writeViewOptions, type Mode } from './view-options.js';
 
 const MAX_POSTS = 500;
+const RATE_HISTORY_SECONDS = 60;
+const SUMMARY_AGE_CYCLE_MS = 10_000;
 const PIN_TO_BOTTOM_STORAGE_KEY = 'bluesky.pinToBottom';
 const THEME_STORAGE_KEY = 'bluesky.theme';
+const SOURCES_STORAGE_KEY = 'bluesky.sources';
+type Theme = SoundTheme;
+
+function parseTheme(value: string | null): Theme {
+  return value === 'dark' || value === 'streamserver' ? value : 'light';
+}
 const SOUND_MODE_STORAGE_KEY = 'bluesky.soundMode';
+const MODE_STORAGE_KEY = 'bluesky.mode';
 const URL_PATTERN = /https?:\/\/[^\s]+/gi;
+const xEnabled = document.documentElement.dataset.enableX === 'true';
 
 const elements = {
+  sourceBluesky: document.querySelector<HTMLInputElement>('#source-bluesky'),
+  sourceX: document.querySelector<HTMLInputElement>('#source-x'),
+  sourceXToggle: document.querySelector<HTMLElement>('#source-x-toggle'),
+  xStatus: document.querySelector<HTMLElement>('#x-status'),
   filterForm: document.querySelector<HTMLFormElement>('#filter-form'),
   filterInput: document.querySelector<HTMLInputElement>('#filter-input'),
   filterChips: document.querySelector<HTMLDivElement>('#filter-chips'),
   streamToggleButton: document.querySelector<HTMLButtonElement>('#stream-toggle-button'),
   clearAppButton: document.querySelector<HTMLButtonElement>('#clear-app-button'),
   clearBigramsButton: document.querySelector<HTMLButtonElement>('#clear-bigrams-button'),
-  soundMode: document.querySelector<HTMLInputElement>('#sound-mode'),
-  themeButton: document.querySelector<HTMLButtonElement>('#theme-button'),
+  settingsButton: document.querySelector<HTMLButtonElement>('#settings-button'),
+  settingsDialog: document.querySelector<HTMLDialogElement>('#settings-dialog'),
+  settingsClose: document.querySelector<HTMLButtonElement>('#settings-close'),
+  modeSelect: document.querySelector<HTMLSelectElement>('#mode-select'),
+  themeSelect: document.querySelector<HTMLSelectElement>('#theme-select'),
   pinToBottom: document.querySelector<HTMLInputElement>('#pin-to-bottom'),
   posts: document.querySelector<HTMLDivElement>('#posts'),
   connectionState: document.querySelector<HTMLElement>('#connection-state'),
   currentFilter: document.querySelector<HTMLElement>('#current-filter'),
   postsPerSecond: document.querySelector<HTMLElement>('#posts-per-second'),
+  rateSparkline: document.querySelector<SVGSVGElement>('#rate-sparkline'),
+  rateSparklinePath: document.querySelector<SVGPathElement>('#rate-sparkline-path'),
   totalPosts: document.querySelector<HTMLElement>('#total-posts'),
   subscriberCount: document.querySelector<HTMLElement>('#subscriber-count'),
   summaryAge: document.querySelector<HTMLElement>('#summary-age'),
+  summaryAgeProgress: document.querySelector<SVGCircleElement>('#summary-age-progress'),
   summaryStatus: document.querySelector<HTMLElement>('#summary-status'),
   summaryText: document.querySelector<HTMLElement>('#summary-text'),
+  sourceComparison: document.querySelector<HTMLElement>('#source-comparison'),
+  comparisonText: document.querySelector<HTMLElement>('#comparison-text'),
+  comparisonStatus: document.querySelector<HTMLElement>('#comparison-status'),
   bigramsList: document.querySelector<HTMLOListElement>('#bigrams-list'),
   keywordsList: document.querySelector<HTMLOListElement>('#keywords-list'),
   systemMessage: document.querySelector<HTMLElement>('#system-message'),
 };
 
 let activeFilters: string[] = [];
+let activeSources: string[] = ['bluesky'];
+
+function restoreSourcesFromUrl() {
+  const params = new URL(window.location.href).searchParams;
+  const sources = (params.has('source') ? params.getAll('source') : loadSourcesPreference())
+    .filter(source => source === 'bluesky' || (source === 'x' && xEnabled));
+  activeSources = sources.length ? [...new Set(sources)].sort() : ['bluesky'];
+  elements.sourceBluesky!.checked = activeSources.includes('bluesky');
+  elements.sourceX!.checked = activeSources.includes('x');
+  elements.sourceX!.disabled = !xEnabled;
+  elements.sourceXToggle!.hidden = !xEnabled;
+  elements.xStatus!.hidden = !activeSources.includes('x');
+  renderSourceComparison();
+}
+
+function appendSources(params: URLSearchParams) {
+  params.delete('source');
+  for (const source of activeSources) params.append('source', source);
+}
 let summarySnapshot: SummarySnapshot = {
   text: 'Waiting for the first 10-second window.',
   keywords: {},
@@ -49,10 +96,18 @@ let bigramSnapshot: BigramSnapshot = {
   updatedAt: null,
 };
 let currentPostsPerSecond = 0;
+let pendingStats: ChannelStats | null = null;
+let postFragment: DocumentFragment | null = null;
+const authorNames = new Map<string, string>();
+let authorsDirty = false;
+const postQueue = new RenderQueue<GenericPost>(renderQueuedPost, commitRenderedPosts, MAX_POSTS);
+let rateHistory: Array<{ second: number; rate: number }> = [];
 let streamStopped = true;
 let streamActive = false;
+let initialPlayPrompt = false;
 const streamClient = new FilterStreamClient();
 const audioEngine = new AudioEngine();
+const crazyMode = new CrazyMode(elements.posts!, () => streamActive, () => { void audioEngine.playSpotlight(); }, () => summarySnapshot.spotlightPostId);
 
 function assertDom() {
   for (const [name, element] of Object.entries(elements)) {
@@ -114,7 +169,7 @@ function renderFilterChips() {
     removeButton.type = 'button';
     removeButton.setAttribute('aria-label', `Remove filter ${filterText}`);
     removeButton.textContent = 'x';
-    removeButton.addEventListener('click', () => {
+    bindButtonActivation(removeButton, () => {
       removeFilter(filterText);
     });
 
@@ -137,6 +192,7 @@ function syncActiveFilters(
 ) {
   activeFilters = normalizeFilterValues(filterTexts);
   updateFilterDisplay();
+  updateStreamToggleButton();
 
   if (options.updateHistory !== false) {
     updateUrlForFilters(activeFilters);
@@ -144,12 +200,22 @@ function syncActiveFilters(
 }
 
 function connect(filterTexts: string[], options: { updateHistory?: boolean } = {}) {
+  crazyMode.clearOverlay();
+  postQueue.clear();
+  postFragment = null;
+  pendingStats = null;
+  rateHistory = [];
+  renderRateSparkline();
+  renderSourceComparison();
+  initialPlayPrompt = false;
   streamStopped = false;
   streamActive = true;
   updateStreamToggleButton();
   syncActiveFilters(filterTexts, { updateHistory: options.updateHistory });
   setConnectionState('Connecting');
   setSystemMessage('Opening stream...');
+  elements.xStatus!.hidden = !activeSources.includes('x');
+  elements.xStatus!.textContent = activeFilters.length ? 'X connecting…' : 'X waiting for filters';
 
   streamClient.connect(activeFilters, {
     onOpen: () => {
@@ -164,15 +230,15 @@ function connect(filterTexts: string[], options: { updateHistory?: boolean } = {
       setSystemMessage('Stream interrupted. Reconnecting...');
     },
     onPost: (post: GenericPost) => {
-      appendPost(post);
+      postQueue.enqueue(post);
     },
+    onAuthor: updateAuthor,
     onStats: (stats: ChannelStats) => {
       currentPostsPerSecond = stats.postsPerSecond;
-      elements.postsPerSecond!.textContent = stats.postsPerSecond.toFixed(2);
-      elements.totalPosts!.textContent = stats.totalPosts.toString();
-      elements.subscriberCount!.textContent = stats.subscriberCount.toString();
+      pendingStats = stats;
     },
     onSummary: (summary: SummarySnapshot) => {
+      renderSourceComparison(summary);
       if (isEmptySummarySnapshot(summary) && !isEmptySummarySnapshot(summarySnapshot)) {
         elements.summaryStatus!.textContent = summary.status;
         renderSummaryAge();
@@ -194,18 +260,28 @@ function connect(filterTexts: string[], options: { updateHistory?: boolean } = {
       renderBigrams();
     },
     onSystem: (payload) => {
+      if (payload.message.startsWith('X ') || payload.message.startsWith('An X ')) {
+        if (!activeSources.includes('x')) return;
+        elements.xStatus!.textContent = payload.message;
+      }
       setSystemMessage(payload.message);
     },
-  });
+  }, activeSources);
 }
 
-function stopStream(config: { keepPosts?: boolean; message?: string } = {}) {
+function stopStream(config: { keepPosts?: boolean; message?: string; updateHistory?: boolean } = {}) {
   streamStopped = true;
   streamActive = false;
+  postQueue.clear();
+  postFragment = null;
+  pendingStats = null;
+  crazyMode.clearOverlay();
   updateStreamToggleButton();
   streamClient.disconnect();
   setConnectionState('Stopped');
+  elements.xStatus!.textContent = 'X paused';
   setSystemMessage(config.message ?? 'Stream stopped.');
+  if (config.updateHistory !== false) updateUrlForFilters(activeFilters);
 
   if (!config.keepPosts) {
     clearPosts();
@@ -213,19 +289,28 @@ function stopStream(config: { keepPosts?: boolean; message?: string } = {}) {
 }
 
 function applyUrlState() {
+  const previousSources = JSON.stringify(activeSources);
+  const previousFilters = JSON.stringify(activeFilters);
+  restoreSourcesFromUrl();
   const filtersFromUrl = getFiltersFromUrl();
+  const options = readViewOptions(new URLSearchParams(window.location.search), {
+    play: filtersFromUrl.length > 0,
+    theme: loadThemePreference(),
+    mode: loadModePreference(),
+  });
+  applyTheme(options.theme);
+  applyMode(options.mode);
   elements.filterInput!.value = '';
   syncActiveFilters(filtersFromUrl, { updateHistory: false });
 
-  if (filtersFromUrl.length > 0) {
-    connect(filtersFromUrl, { updateHistory: false });
-    return;
+  if (options.play) {
+    if (!streamActive || previousSources !== JSON.stringify(activeSources) || previousFilters !== JSON.stringify(activeFilters)) {
+      connect(filtersFromUrl, { updateHistory: false });
+    }
+  } else {
+    stopStream({ keepPosts: true, updateHistory: false });
+    setReadyMessage();
   }
-
-  stopStream({
-    keepPosts: false,
-    message: 'Ready. Enter a filter and press play.',
-  });
 }
 
 function removeFilter(filterText: string) {
@@ -257,10 +342,19 @@ function addFilters(filterTexts: string[]) {
 }
 
 function updateStreamToggleButton() {
-  elements.streamToggleButton!.textContent = streamActive ? 'pause' : 'play';
+  const button = elements.streamToggleButton!;
+  const label = streamActive ? 'Pause' : 'Play';
+  button.dataset.playing = String(streamActive);
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  elements.streamToggleButton!.classList.toggle(
+    'play-prompt',
+    initialPlayPrompt && !streamActive && activeFilters.length > 0,
+  );
 }
 
 function resetAppState() {
+  renderSourceComparison();
   summarySnapshot = {
     text: 'Waiting for the first 10-second window.',
     keywords: {},
@@ -272,6 +366,9 @@ function resetAppState() {
     updatedAt: null,
   };
   currentPostsPerSecond = 0;
+  pendingStats = null;
+  rateHistory = [];
+  renderRateSparkline();
   elements.postsPerSecond!.textContent = '0.00';
   elements.totalPosts!.textContent = '0';
   elements.subscriberCount!.textContent = '0';
@@ -298,10 +395,10 @@ function clearApplication() {
   setReadyMessage();
 }
 
-function appendPost(post: GenericPost) {
-  const container = elements.posts!;
+function renderQueuedPost(post: GenericPost) {
   const article = document.createElement('article');
   article.className = 'post-card';
+  article.dataset.postId = post.id;
   article.append(createPostMeta(post));
   article.append(createPostBody(post));
 
@@ -310,7 +407,16 @@ function appendPost(post: GenericPost) {
     article.append(imageGallery);
   }
 
-  container.append(article);
+  layoutPost(article);
+  postFragment ??= document.createDocumentFragment();
+  postFragment.append(article);
+}
+
+function commitRenderedPosts() {
+  const container = elements.posts!;
+  if (!postFragment) return;
+  container.append(postFragment);
+  postFragment = null;
 
   while (container.children.length > MAX_POSTS) {
     container.firstElementChild?.remove();
@@ -321,11 +427,56 @@ function appendPost(post: GenericPost) {
   }
 
   if (isSoundModeEnabled()) {
-    void audioEngine.playClick(currentPostsPerSecond);
+    void audioEngine.playClick(currentPostsPerSecond, parseTheme(document.documentElement.dataset.theme ?? null));
+  }
+}
+
+function authorKey(source: string, authorId: string): string {
+  return JSON.stringify([source, authorId]);
+}
+
+function updateAuthor(author: AuthorUpdate) {
+  const key = authorKey(author.source, author.authorId);
+  authorNames.delete(key);
+  authorNames.set(key, author.username);
+  if (authorNames.size > MAX_POSTS * 2) authorNames.delete(authorNames.keys().next().value!);
+  authorsDirty = true;
+}
+
+function renderPendingUpdates() {
+  if (pendingStats) {
+    const stats = pendingStats;
+    pendingStats = null;
+    const second = Math.floor(Date.now() / 1_000);
+    const latest = rateHistory.at(-1);
+    if (latest?.second === second) latest.rate = stats.postsPerSecond;
+    else rateHistory.push({ second, rate: stats.postsPerSecond });
+    for (const [element, value] of [
+      [elements.postsPerSecond!, stats.postsPerSecond.toFixed(2)],
+      [elements.totalPosts!, String(stats.totalPosts)],
+      [elements.subscriberCount!, String(stats.subscriberCount)],
+    ] as const) {
+      if (element.textContent !== value) element.textContent = value;
+    }
+  }
+  if (authorsDirty) {
+    authorsDirty = false;
+    document.querySelectorAll<HTMLAnchorElement>('.post-author').forEach(link => {
+      const name = authorNames.get(authorKey(link.dataset.source!, link.dataset.authorId!));
+      if (name && link.textContent !== name) {
+        link.textContent = name;
+        link.hidden = false;
+      }
+    });
   }
 }
 
 function clearPosts() {
+  postQueue.clear();
+  postFragment = null;
+  authorNames.clear();
+  authorsDirty = false;
+  crazyMode.clearOverlay();
   elements.posts!.replaceChildren();
   if (isPinnedToBottom()) {
     elements.posts!.scrollTop = elements.posts!.scrollHeight;
@@ -365,33 +516,50 @@ function persistPinToBottomPreference(value: boolean) {
   }
 }
 
-function loadThemePreference(): 'light' | 'dark' {
+function loadSourcesPreference(): string[] {
   try {
-    return window.localStorage.getItem(THEME_STORAGE_KEY) === 'dark'
-      ? 'dark'
-      : 'light';
+    const saved: unknown = JSON.parse(window.localStorage.getItem(SOURCES_STORAGE_KEY) ?? 'null');
+    return Array.isArray(saved) ? saved.filter((source): source is string => typeof source === 'string') : ['bluesky'];
   } catch {
-    return 'light';
+    return ['bluesky'];
   }
 }
 
-function loadSoundModePreference(): boolean {
+function persistSourcesPreference() {
   try {
-    return window.localStorage.getItem(SOUND_MODE_STORAGE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-function persistSoundModePreference(value: boolean) {
-  try {
-    window.localStorage.setItem(SOUND_MODE_STORAGE_KEY, String(value));
+    window.localStorage.setItem(SOURCES_STORAGE_KEY, JSON.stringify(activeSources));
   } catch {
     // Ignore storage failures and keep the in-memory setting.
   }
 }
 
-function persistThemePreference(theme: 'light' | 'dark') {
+function loadThemePreference(): Theme {
+  try {
+    return parseTheme(window.localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return 'light';
+  }
+}
+
+function loadModePreference(): Mode {
+  try {
+    const mode = window.localStorage.getItem(MODE_STORAGE_KEY);
+    if (mode === 'sound' || mode === 'crazy' || mode === 'off') return mode;
+    return window.localStorage.getItem(SOUND_MODE_STORAGE_KEY) === 'true' ? 'sound' : 'off';
+  } catch {
+    return 'off';
+  }
+}
+
+function persistModePreference(value: Mode) {
+  try {
+    window.localStorage.setItem(MODE_STORAGE_KEY, value);
+  } catch {
+    // Ignore storage failures and keep the in-memory setting.
+  }
+}
+
+function persistThemePreference(theme: Theme) {
   try {
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   } catch {
@@ -399,14 +567,30 @@ function persistThemePreference(theme: 'light' | 'dark') {
   }
 }
 
-function applyTheme(theme: 'light' | 'dark') {
+function applyTheme(theme: Theme) {
   document.documentElement.dataset.theme = theme;
-  elements.themeButton!.textContent =
-    theme === 'dark' ? 'Light mode' : 'Dark mode';
+  elements.themeSelect!.value = theme;
+  document.querySelectorAll<HTMLElement>('.post-card').forEach(layoutPost);
+  if (isPinnedToBottom()) elements.posts!.scrollTop = elements.posts!.scrollHeight;
+}
+
+function layoutPost(article: HTMLElement) {
+  const time = article.querySelector('time')!;
+  if (document.documentElement.dataset.theme === 'streamserver') {
+    article.querySelector('p')!.after(time);
+  } else {
+    article.querySelector('.post-meta')!.append(time);
+  }
+}
+
+function applyMode(mode: Mode) {
+  elements.modeSelect!.value = mode;
+  crazyMode.setEnabled(mode === 'crazy');
+  if (mode === 'crazy') void audioEngine.primeSpotlight();
 }
 
 function isSoundModeEnabled(): boolean {
-  return elements.soundMode!.checked;
+  return elements.modeSelect!.value === 'sound' || elements.modeSelect!.value === 'crazy';
 }
 
 function getFiltersFromUrl(): string[] {
@@ -414,8 +598,14 @@ function getFiltersFromUrl(): string[] {
   return normalizeFilterValues(params.getAll('filter'));
 }
 
-function updateUrlForFilters(filterTexts: string[]) {
+function updateUrlForFilters(filterTexts: string[], replace = false) {
   const nextUrl = new URL(window.location.href);
+  appendSources(nextUrl.searchParams);
+  writeViewOptions(nextUrl.searchParams, {
+    play: streamActive,
+    theme: parseTheme(document.documentElement.dataset.theme ?? null),
+    mode: elements.modeSelect!.value as Mode,
+  });
   nextUrl.searchParams.delete('filter');
   for (const filterText of filterTexts) {
     nextUrl.searchParams.append('filter', filterText);
@@ -425,11 +615,41 @@ function updateUrlForFilters(filterTexts: string[]) {
     return;
   }
 
-  window.history.pushState({}, '', nextUrl);
+  if (replace) window.history.replaceState({}, '', nextUrl);
+  else window.history.pushState({}, '', nextUrl);
+}
+
+function renderSourceComparison(summary?: SummarySnapshot) {
+  elements.sourceComparison!.hidden = !(activeSources.includes('bluesky') && activeSources.includes('x'));
+  elements.comparisonText!.textContent = summary?.comparison ?? 'Waiting for recent posts from both sources.';
+  elements.comparisonStatus!.textContent = summary?.comparison && !summary.comparison.startsWith('Waiting for') ? summary.status : 'waiting';
 }
 
 function renderSummaryAge() {
   elements.summaryAge!.textContent = formatAge(summarySnapshot.updatedAt);
+  const updatedAt = summarySnapshot.updatedAt === null ? NaN : Date.parse(summarySnapshot.updatedAt);
+  const progress = Number.isFinite(updatedAt)
+    ? Math.min(1, Math.max(0, (Date.now() - updatedAt) / SUMMARY_AGE_CYCLE_MS))
+    : 0;
+  elements.summaryAgeProgress!.setAttribute('stroke-dashoffset', String(1 - progress));
+}
+
+function renderRateSparkline() {
+  const now = Math.floor(Date.now() / 1_000);
+  rateHistory = rateHistory.filter(sample => sample.second > now - RATE_HISTORY_SECONDS);
+  const peak = Math.max(1, ...rateHistory.map(sample => sample.rate));
+  let previousSecond: number | undefined;
+  const path = rateHistory.map(sample => {
+    const x = 71 - (now - sample.second) * 70 / (RATE_HISTORY_SECONDS - 1);
+    const y = 19 - sample.rate / peak * 17;
+    // Leave gaps when the stream is paused or disconnected.
+    const command = previousSecond === sample.second - 1 ? 'L' : 'M';
+    previousSecond = sample.second;
+    return `${command}${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(' ');
+  elements.rateSparklinePath!.setAttribute('d', path);
+  elements.rateSparkline!.setAttribute('aria-label',
+    `Posts per second over the last 60 seconds. Peak ${Math.max(0, ...rateHistory.map(sample => sample.rate)).toFixed(2)}.`);
 }
 
 function isEmptySummarySnapshot(snapshot: SummarySnapshot): boolean {
@@ -464,6 +684,7 @@ function renderBigrams() {
 
 async function clearBigrams() {
   const url = new URL('/reset-bigrams', window.location.origin);
+  appendSources(url.searchParams);
   for (const filterText of activeFilters) {
     url.searchParams.append('filter', filterText);
   }
@@ -503,7 +724,7 @@ function renderKeywords() {
     button.className = 'keyword-button';
     button.type = 'button';
     button.textContent = keyword;
-    button.addEventListener('click', () => {
+    bindButtonActivation(button, () => {
       addFilters([keyword, ...relatedTerms]);
     });
     item.append(button);
@@ -550,11 +771,15 @@ function createPostMeta(post: GenericPost): HTMLElement {
   meta.className = 'post-meta';
 
   const userLink = document.createElement('a');
-  userLink.className = 'post-link';
-  userLink.textContent = post.username;
+  userLink.className = 'post-link post-author';
+  userLink.dataset.source = post.source ?? 'bluesky';
+  userLink.dataset.authorId = post.authorId ?? post.username ?? '';
+  const username = authorNames.get(authorKey(userLink.dataset.source, userLink.dataset.authorId)) ?? post.username;
+  userLink.textContent = username ?? '';
+  userLink.hidden = !username;
   userLink.href =
     post.profileUrl ??
-    `https://bsky.app/profile/${encodeURIComponent(post.username)}`;
+    `https://bsky.app/profile/${encodeURIComponent(post.authorId ?? post.username ?? '').replaceAll('%3A', ':')}`;
   userLink.target = '_blank';
   userLink.rel = 'noreferrer noopener';
 
@@ -569,7 +794,10 @@ function createPostMeta(post: GenericPost): HTMLElement {
   time.dateTime = post.createdAt;
   time.append(timeLink);
 
-  meta.append(userLink, time);
+  const sourceLabel = document.createElement('span');
+  sourceLabel.className = 'pill post-source';
+  sourceLabel.textContent = post.source === 'x' ? 'X' : 'Bluesky';
+  meta.append(sourceLabel, userLink, time);
   return meta;
 }
 
@@ -601,7 +829,7 @@ function createPostImages(post: GenericPost): HTMLElement | null {
     const element = document.createElement('img');
     element.className = 'post-image';
     element.src = image.url;
-    element.alt = image.alt || 'Embedded Bluesky image';
+    element.alt = image.alt || 'Embedded post image';
     element.loading = 'lazy';
 
     link.append(element);
@@ -637,7 +865,7 @@ function appendFacetedText(
 
     if (href) {
       const anchor = document.createElement('a');
-      anchor.className = 'post-link';
+      anchor.className = `post-link post-${facet.type}`;
       anchor.href = href;
       anchor.target = '_blank';
       anchor.rel = 'noreferrer noopener';
@@ -659,7 +887,7 @@ function facetToHref(facet: NonNullable<GenericPost['facets']>[number]): string 
   }
 
   if (facet.type === 'mention' && facet.did) {
-    return `https://bsky.app/profile/${encodeURIComponent(facet.did)}`;
+    return `https://bsky.app/profile/${encodeURIComponent(facet.did).replaceAll('%3A', ':')}`;
   }
 
   if (facet.type === 'tag' && facet.tag) {
@@ -783,12 +1011,58 @@ function escapeForRegExp(value: string): string {
 
 function init() {
   assertDom();
+  // Yield before and after touch gestures so feed insertion/scrolling cannot
+  // compete with the release event. Incoming posts remain in the bounded queue.
+  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'] as const) {
+    document.addEventListener(type, event => {
+      if (event.pointerType === 'touch') postQueue.defer(200);
+    }, { capture: true, passive: true });
+  }
+  bindButtonActivation(elements.settingsButton!, () => {
+    crazyMode.clearOverlay();
+    elements.settingsDialog!.showModal();
+  });
+  bindButtonActivation(elements.settingsClose!, () => elements.settingsDialog!.close());
+  elements.settingsDialog!.addEventListener('click', event => {
+    if (event.target !== elements.settingsDialog) return;
+    const bounds = elements.settingsDialog!.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right
+      || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+      elements.settingsDialog!.close();
+    }
+  });
+  restoreSourcesFromUrl();
+  for (const checkbox of [elements.sourceBluesky!, elements.sourceX!]) {
+    checkbox.addEventListener('change', () => {
+      if (!elements.sourceBluesky!.checked && !elements.sourceX!.checked) {
+        checkbox.checked = true;
+        setSystemMessage('Select at least one source.');
+        return;
+      }
+      activeSources = [elements.sourceBluesky!.checked ? 'bluesky' : '', xEnabled && elements.sourceX!.checked ? 'x' : ''].filter(Boolean);
+      persistSourcesPreference();
+      renderSourceComparison();
+      elements.xStatus!.hidden = !activeSources.includes('x');
+      elements.xStatus!.textContent = 'X ready';
+      if (streamActive) connect(activeFilters);
+      else { updateUrlForFilters(activeFilters); setReadyMessage(); }
+    });
+  }
   elements.pinToBottom!.checked = loadPinToBottomPreference();
-  elements.soundMode!.checked = loadSoundModePreference();
-  applyTheme(loadThemePreference());
+  const initialFilters = getFiltersFromUrl();
+  const initialOptions = readViewOptions(new URLSearchParams(window.location.search), {
+    play: initialFilters.length > 0,
+    theme: loadThemePreference(),
+    mode: loadModePreference(),
+  });
+  applyMode(initialOptions.mode);
+  applyTheme(initialOptions.theme);
   updateStreamToggleButton();
 
-  const initialFilters = getFiltersFromUrl();
+  initialPlayPrompt = initialFilters.length === 0
+    && activeSources.length === 1 && activeSources[0] === 'bluesky'
+    && elements.pinToBottom!.checked && !isSoundModeEnabled()
+    && document.documentElement.dataset.theme === 'light';
   syncActiveFilters(initialFilters, { updateHistory: false });
   elements.filterInput!.value = '';
   setConnectionState('Stopped');
@@ -805,7 +1079,7 @@ function init() {
       return;
     }
   });
-  elements.streamToggleButton!.addEventListener('click', () => {
+  bindButtonActivation(elements.streamToggleButton!, () => {
     if (streamActive) {
       stopStream({ keepPosts: true });
       return;
@@ -813,10 +1087,10 @@ function init() {
 
     connect(activeFilters);
   });
-  elements.clearAppButton!.addEventListener('click', () => {
+  bindButtonActivation(elements.clearAppButton!, () => {
     clearApplication();
   });
-  elements.clearBigramsButton!.addEventListener('click', async () => {
+  bindButtonActivation(elements.clearBigramsButton!, async () => {
     try {
       await clearBigrams();
       setSystemMessage('Bigrams cleared.');
@@ -826,16 +1100,18 @@ function init() {
       setSystemMessage(`Unable to clear bigrams: ${message}`);
     }
   });
-  elements.themeButton!.addEventListener('click', () => {
-    const nextTheme =
-      document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  elements.themeSelect!.addEventListener('change', () => {
+    const nextTheme = parseTheme(elements.themeSelect!.value);
     applyTheme(nextTheme);
     persistThemePreference(nextTheme);
+    updateUrlForFilters(activeFilters);
   });
-  elements.soundMode!.addEventListener('change', () => {
-    const enabled = isSoundModeEnabled();
-    persistSoundModePreference(enabled);
-    if (enabled) {
+  elements.modeSelect!.addEventListener('change', () => {
+    const mode = elements.modeSelect!.value as Mode;
+    persistModePreference(mode);
+    applyMode(mode);
+    updateUrlForFilters(activeFilters);
+    if (isSoundModeEnabled()) {
       void audioEngine.prime();
     }
   });
@@ -856,12 +1132,22 @@ function init() {
     }
   });
 
-  setInterval(renderSummaryAge, 1_000);
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') crazyMode.clearOverlay();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) crazyMode.clearOverlay();
+  });
+
+  setInterval(renderPendingUpdates, 250);
+  setInterval(renderSummaryAge, 250);
+  setInterval(renderRateSparkline, 1_000);
   renderBigrams();
   renderKeywords();
-  if (initialFilters.length > 0) {
+  if (initialOptions.play) {
     connect(initialFilters, { updateHistory: false });
   }
+  updateUrlForFilters(activeFilters, true);
 }
 
 init();

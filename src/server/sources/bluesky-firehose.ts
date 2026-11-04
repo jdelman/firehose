@@ -14,7 +14,13 @@ const DEFAULT_ENDPOINT =
 const DEFAULT_LANGUAGE = 'en';
 const POST_RECORD_TYPE = 'app.bsky.feed.post';
 
-const handleCache = new Map<string, Promise<string>>();
+type HandleEntry = { handle: string; resolved: Promise<string> };
+const handleCache = new Map<string, HandleEntry>();
+const MAX_CACHED_HANDLES = 10_000;
+const USERNAME_WAIT_MS = 1_000;
+const RECONNECT_BASE_MS = 1_000;
+const RECONNECT_MAX_MS = 30_000;
+const STABLE_CONNECTION_MS = 30_000;
 
 type CommitFrame = {
   repo?: string;
@@ -34,27 +40,48 @@ export class BlueskyFirehoseSource implements PostSourceAdapter {
   private readonly endpoint: string;
   private socket: WebSocket | null = null;
   private disconnectLogged = false;
+  private stopped = true;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private readonly fetcher: typeof fetch;
+  private readonly pendingHandles = new Set<string>();
+  private readonly pendingPosts = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(config: {
     channelKey: string;
     filterTexts: string[];
     callbacks: SourceCallbacks;
     endpoint?: string;
+    fetcher?: typeof fetch;
   }) {
     this.channelKey = config.channelKey;
     this.filterTexts = normalizeFilters(config.filterTexts);
     this.rawFilterTexts = config.filterTexts;
     this.callbacks = config.callbacks;
     this.endpoint = config.endpoint ?? DEFAULT_ENDPOINT;
+    this.fetcher = config.fetcher ?? fetch;
   }
 
   start(): void {
-    this.disconnectLogged = false;
-    this.socket = new WebSocket(this.endpoint, {
-      perMessageDeflate: false,
-    });
+    if (!this.stopped) return;
+    this.stopped = false;
+    this.reconnectAttempt = 0;
+    this.connect();
+  }
 
-    this.socket.on('open', () => {
+  private connect(): void {
+    if (this.stopped) return;
+    this.disconnectLogged = false;
+    const socket = new WebSocket(this.endpoint, {
+      perMessageDeflate: false,
+      handshakeTimeout: 15_000,
+    });
+    this.socket = socket;
+    let openedAt = 0;
+
+    socket.on('open', () => {
+      if (this.stopped || this.socket !== socket) return;
+      openedAt = Date.now();
       logBlueskyEvent({
         event: 'CONNECT',
         filterText: this.rawFilterTexts.join(', ') || '__all__',
@@ -63,15 +90,23 @@ export class BlueskyFirehoseSource implements PostSourceAdapter {
       this.callbacks.onSystemMessage(`Connected to ${this.endpoint}`);
     });
 
-    this.socket.on('message', (data) => {
-      void this.handleMessage(data);
+    socket.on('message', (data) => {
+      if (this.stopped || this.socket !== socket) return;
+      try {
+        this.handleMessage(data);
+      } catch (error) {
+        this.callbacks.onSystemMessage(`Firehose message error: ${error instanceof Error ? error.message : String(error)}`);
+      }
     });
 
-    this.socket.on('error', (error) => {
+    socket.on('error', (error) => {
+      if (this.stopped || this.socket !== socket) return;
       this.callbacks.onSystemMessage(`Firehose error: ${error.message}`);
     });
 
-    this.socket.on('close', (code, reason) => {
+    socket.on('close', (code, reason) => {
+      if (this.stopped || this.socket !== socket) return;
+      this.socket = null;
       if (!this.disconnectLogged) {
         this.disconnectLogged = true;
         const detail = reason ? `code=${code} reason=${reason.toString()}` : `code=${code}`;
@@ -84,11 +119,31 @@ export class BlueskyFirehoseSource implements PostSourceAdapter {
       }
 
       const detail = reason ? ` (${reason.toString()})` : '';
-      this.callbacks.onSystemMessage(`Firehose closed with code ${code}${detail}`);
+      if (openedAt && Date.now() - openedAt >= STABLE_CONNECTION_MS) {
+        this.reconnectAttempt = 0;
+      }
+      const ceiling = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** this.reconnectAttempt);
+      this.reconnectAttempt = Math.min(this.reconnectAttempt + 1, 5);
+      const delay = Math.round(ceiling * (0.5 + Math.random() * 0.5));
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.connect();
+      }, delay);
+      this.reconnectTimer.unref?.();
+      this.callbacks.onSystemMessage(
+        `Firehose closed with code ${code}${detail}. Reconnecting in ${(delay / 1_000).toFixed(1)}s...`,
+      );
     });
   }
 
   stop(): void {
+    this.stopped = true;
+    for (const timer of this.pendingPosts) clearTimeout(timer);
+    this.pendingPosts.clear();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (!this.socket) {
       return;
     }
@@ -103,11 +158,44 @@ export class BlueskyFirehoseSource implements PostSourceAdapter {
       });
     }
 
-    this.socket.close();
+    const socket = this.socket;
     this.socket = null;
+    if (socket.readyState === WebSocket.CONNECTING) socket.terminate();
+    else socket.close();
   }
 
-  private async handleMessage(data: WebSocket.RawData): Promise<void> {
+  private deliverPost(post: GenericPost, handle: HandleEntry): void {
+    const send = () => {
+      if (this.stopped) return;
+      post.username = handle.handle === post.authorId ? undefined : handle.handle;
+      this.callbacks.onPost(post);
+      this.watchHandle(post.authorId, handle);
+    };
+    if (handle.handle !== post.authorId) {
+      send();
+      return;
+    }
+    // Give each cache miss one second without blocking other incoming posts.
+    const timer = setTimeout(() => {
+      this.pendingPosts.delete(timer);
+      send();
+    }, USERNAME_WAIT_MS);
+    this.pendingPosts.add(timer);
+    timer.unref?.();
+  }
+
+  private watchHandle(did: string, entry: HandleEntry): void {
+    if (entry.handle !== did || this.pendingHandles.has(did)) return;
+    this.pendingHandles.add(did);
+    void entry.resolved.then(username => {
+      this.pendingHandles.delete(did);
+      if (!this.stopped && username !== did) {
+        this.callbacks.onAuthor?.({ source: 'bluesky', authorId: did, username });
+      }
+    });
+  }
+
+  private handleMessage(data: WebSocket.RawData): void {
     const frame = parseFrame(data);
     if (!frame) {
       return;
@@ -117,9 +205,6 @@ export class BlueskyFirehoseSource implements PostSourceAdapter {
     if (posts.length === 0 || !frame.repo) {
       return;
     }
-
-    const username = await resolveHandle(frame.repo);
-    const profileUrl = `https://bsky.app/profile/${encodeURIComponent(username)}`;
 
     for (let index = 0; index < posts.length; index += 1) {
       const postEntry = posts[index]!;
@@ -137,15 +222,17 @@ export class BlueskyFirehoseSource implements PostSourceAdapter {
         continue;
       }
 
-      this.callbacks.onPost({
+      const handle = resolveHandle(frame.repo, this.fetcher);
+      // DID links remain valid while the handle lookup runs in the background.
+      const profileUrl = `https://bsky.app/profile/${encodeURIComponent(frame.repo).replaceAll('%3A', ':')}`;
+      this.deliverPost({
         id: `${frame.repo}:${post.createdAt ?? frame.time ?? Date.now()}:${index}:${hashText(post.text)}`,
         source: 'bluesky',
         channelKey: this.channelKey,
         authorId: frame.repo,
-        username,
         profileUrl,
         postUrl: postEntry.rkey
-          ? `https://bsky.app/profile/${encodeURIComponent(username)}/post/${encodeURIComponent(postEntry.rkey)}`
+          ? `https://bsky.app/profile/${encodeURIComponent(frame.repo).replaceAll('%3A', ':')}/post/${encodeURIComponent(postEntry.rkey)}`
           : undefined,
         text: post.text,
         facets: extractFacets(post),
@@ -153,7 +240,7 @@ export class BlueskyFirehoseSource implements PostSourceAdapter {
         createdAt: formatTimestamp(post.createdAt ?? frame.time),
         language: Array.isArray(post.langs) ? post.langs[0] : undefined,
         raw: post,
-      });
+      }, handle);
     }
   }
 }
@@ -422,30 +509,28 @@ function hashText(text: string): string {
   return Math.abs(hash).toString(36);
 }
 
-async function resolveHandle(did: string): Promise<string> {
+function resolveHandle(did: string, fetcher: typeof fetch): HandleEntry {
   const cached = handleCache.get(did);
-  if (cached) {
-    return cached;
-  }
+  if (cached) return cached;
 
-  const promise = (async () => {
+  if (handleCache.size >= MAX_CACHED_HANDLES) {
+    handleCache.delete(handleCache.keys().next().value!);
+  }
+  const entry: HandleEntry = { handle: did, resolved: Promise.resolve(did) };
+  handleCache.set(did, entry);
+  entry.resolved = (async () => {
     try {
-      const response = await fetch(
+      const response = await fetcher(
         `https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(did)}`,
         { signal: AbortSignal.timeout(10_000) },
       );
-
-      if (!response.ok) {
-        throw new Error(`profile lookup failed with ${response.status}`);
-      }
-
+      if (!response.ok) return did;
       const data = (await response.json()) as { handle?: string };
-      return data.handle || did;
+      if (data.handle) entry.handle = data.handle;
     } catch {
-      return did;
+      // Keep the DID fallback if this lookup fails.
     }
+    return entry.handle;
   })();
-
-  handleCache.set(did, promise);
-  return promise;
+  return entry;
 }

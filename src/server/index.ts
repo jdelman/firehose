@@ -3,19 +3,24 @@ import { logHttpRequest } from './logger.ts';
 import { InMemoryPubSubAdapter } from './pubsub/in-memory-pubsub.ts';
 import { routeRequest } from './routes.ts';
 import { BlueskyFirehoseSource } from './sources/bluesky-firehose.ts';
+import { XStreamManager } from './sources/x-stream.ts';
 
 export function startServer(port = Number(process.env.PORT ?? 3000)) {
+  const xStream = new XStreamManager();
   const registry = new ChannelRegistry({
     pubsub: new InMemoryPubSubAdapter(),
-    createSource: ({ channelKey, filterTexts, callbacks }) =>
-      new BlueskyFirehoseSource({
-        channelKey,
-        filterTexts,
-        callbacks,
-      }),
+    createSource: ({ sources, ...config }) => {
+      const adapters = sources.map(source => source === 'x'
+        ? xStream.source(config) : new BlueskyFirehoseSource(config));
+      return {
+        start() { for (const adapter of adapters) adapter.start(); },
+        async stop() { await Promise.all(adapters.map(adapter => adapter.stop())); },
+      };
+    },
   });
 
   const server = Bun.serve({
+    hostname: '0.0.0.0',
     port,
     async fetch(request, server) {
       const response = await routeRequest(request, registry);
@@ -36,6 +41,17 @@ export function startServer(port = Number(process.env.PORT ?? 3000)) {
       return response;
     },
   });
+
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    await server.stop(true);
+    await xStream.close();
+    process.exit(0);
+  };
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
 
   return server;
 }

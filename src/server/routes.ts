@@ -3,6 +3,9 @@ import { join, normalize } from 'node:path';
 
 import type { ChannelRegistry } from './channel-registry.ts';
 import { serializeSseEvent } from './models/events.ts';
+import { normalizeSources, type SourceName } from './sources/source.ts';
+import { checkSitePassword } from './site-auth.ts';
+import { adminUsage } from './admin-usage.ts';
 
 const textEncoder = new TextEncoder();
 const webRoot = join(import.meta.dir, '../web');
@@ -12,10 +15,33 @@ const transpiler = new Bun.Transpiler({
 });
 
 export async function routeRequest(request: Request, registry: ChannelRegistry): Promise<Response> {
+  const authResponse = await checkSitePassword(request);
+  if (authResponse) return authResponse;
   const url = new URL(request.url);
+  if (url.pathname === '/admin' || url.pathname === '/admin/usage') {
+    if (request.method !== 'GET') return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET' } });
+    if (url.pathname === '/admin') return serveStaticFile('admin.html', 'text/html; charset=utf-8');
+    return Response.json(await adminUsage.getUsage(), { headers: { 'Cache-Control': 'no-store' } });
+  }
+  const xEnabled = process.env.ENABLE_X?.trim().toLowerCase() === 'true';
+  const sources = normalizeSources(url.searchParams.has('source') ? url.searchParams.getAll('source') : undefined)
+    .filter(source => source !== 'x' || xEnabled);
 
   if (url.pathname === '/') {
-    return serveStaticFile('index.html', 'text/html; charset=utf-8');
+    const html = await Bun.file(join(webRoot, 'index.html')).text();
+    return new Response(html.replace('data-enable-x="false"', `data-enable-x="${xEnabled}"`), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+
+  if (url.pathname === '/sounds/gunshot.m4a') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
+    }
+    const file = Bun.file(join(import.meta.dir, '../../sounds/gunshot.m4a'));
+    return new Response(request.method === 'HEAD' ? null : file, {
+      headers: { 'Content-Type': 'audio/mp4', 'Content-Length': String(file.size), 'Cache-Control': 'public, max-age=3600' },
+    });
   }
 
   if (url.pathname === '/web/styles.css') {
@@ -27,11 +53,12 @@ export async function routeRequest(request: Request, registry: ChannelRegistry):
   }
 
   if (url.pathname === '/events') {
-    return createSseResponse(request, registry, url.searchParams.getAll('filter'));
+    if (!sources.length) return new Response(xEnabled ? 'Select Bluesky or X.' : 'X is disabled. Select Bluesky.', { status: 400 });
+    return createSseResponse(request, registry, url.searchParams.getAll('filter'), sources);
   }
 
   if (url.pathname === '/reset-bigrams' && request.method === 'POST') {
-    registry.resetBigrams(url.searchParams.getAll('filter'));
+    registry.resetBigrams(url.searchParams.getAll('filter'), sources);
     return new Response(null, {
       status: 204,
     });
@@ -49,6 +76,7 @@ async function serveStaticFile(relativePath: string, contentType: string): Promi
   return new Response(file, {
     headers: {
       'Content-Type': contentType,
+      'Cache-Control': 'no-store',
     },
   });
 }
@@ -75,7 +103,9 @@ function createSseResponse(
   request: Request,
   registry: ChannelRegistry,
   filterTexts: string[],
+  sources: SourceName[],
 ): Response {
+  let cleanup = () => {};
   const stream = new ReadableStream<Uint8Array>({
     start: (controller) => {
       const send = (chunk: string) => {
@@ -83,6 +113,7 @@ function createSseResponse(
       };
 
       const subscription = registry.subscribe({
+        sources,
         filterTexts,
         listener: (event) => {
           send(serializeSseEvent(event));
@@ -110,13 +141,22 @@ function createSseResponse(
         }),
       );
 
-      const cleanup = () => {
+      let closed = false;
+      for (const message of subscription.snapshot.systemMessages) {
+        send(serializeSseEvent({ type: 'system', data: { message } }));
+      }
+      cleanup = () => {
+        if (closed) return;
+        closed = true;
+        request.signal.removeEventListener('abort', cleanup);
         void subscription.unsubscribe();
-        controller.close();
+        try { controller.close(); } catch { /* Already canceled by the browser. */ }
       };
 
       request.signal.addEventListener('abort', cleanup, { once: true });
+      if (request.signal.aborted) cleanup();
     },
+    cancel() { cleanup(); },
   });
 
   return new Response(stream, {

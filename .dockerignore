@@ -1,0 +1,6 @@
+*
+!package.json
+!bun.lockb
+!index.ts
+!src/
+!src/**

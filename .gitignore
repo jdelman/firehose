@@ -48,3 +48,4 @@ out/
 
 # Bun
 .bun/
+.vercel

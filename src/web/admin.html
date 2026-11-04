@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Firehose — API usage</title>
+  <link rel="stylesheet" href="/web/styles.css">
+  <style>
+    body { height: auto; overflow: auto; padding: clamp(1rem, 4vw, 3rem); }
+    main { max-width: 1100px; margin: auto; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    h1, h2, th { font-family: 'Courier New', Courier, monospace; }
+    h1 { margin-bottom: .4rem; }
+    h2 { font-size: 1.2rem; margin-top: 0; }
+    p { line-height: 1.5; }
+    button { padding: .5rem 1rem; font: inherit; color: var(--button-text); background: var(--button-bg); border: 1px solid var(--panel-border); cursor: pointer; }
+    .balances { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+    .balance { border: 1px solid var(--panel-border); padding: 1.2rem; }
+    .amount { display: block; font-size: 2.5rem; margin: .6rem 0; font-variant-numeric: tabular-nums; }
+    .muted { color: var(--muted); }
+    .notice { margin-bottom: 0; overflow-wrap: anywhere; }
+    .table-scroll { overflow-x: auto; border: 1px solid var(--panel-border); }
+    table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    caption { text-align: left; padding: 1rem; font-weight: bold; }
+    th, td { text-align: right; padding: .7rem 1rem; border-top: 1px solid var(--panel-border); }
+    th:first-child, td:first-child { text-align: left; }
+    thead { background: var(--button-bg); }
+    @media (max-width: 600px) { .balances { grid-template-columns: 1fr; } th, td { padding: .6rem; } }
+  </style>
+</head>
+<body>
+<main>
+  <a href="/">← Firehose</a>
+  <header><div><h1>API usage</h1><p class="muted">Daily usage and remaining credits · USD · UTC dates</p></div><button id="refresh" type="button">Refresh</button></header>
+  <p id="status" role="status">Loading usage…</p>
+  <div class="balances">
+    <section class="balance"><h2>X</h2><span class="muted">Remaining account credits</span><strong class="amount" id="x-balance">—</strong><p>Daily usage covers posts read by the X project, including other apps in that project.</p><div id="x-notices"></div><a href="https://console.x.com/" target="_blank" rel="noreferrer noopener">X console ↗</a></section>
+    <section class="balance"><h2>OpenRouter</h2><span class="muted">Remaining account credits</span><strong class="amount" id="or-balance">—</strong><p id="or-key">Current key: loading…</p><p>History covers the entire account across all models and keys. Today’s key spend is shown separately.</p><div id="or-notices"></div><a href="https://openrouter.ai/activity" target="_blank" rel="noreferrer noopener">OpenRouter activity ↗</a></section>
+  </div>
+  <div class="table-scroll"><table>
+    <caption>Daily usage · last 30 completed days and today</caption>
+    <thead><tr><th scope="col">Date (UTC)</th><th scope="col">X posts read</th><th scope="col">OpenRouter spend</th><th scope="col">Requests</th><th scope="col">Tokens</th></tr></thead>
+    <tbody id="daily"><tr><td colspan="5">Loading daily usage…</td></tr></tbody>
+  </table></div>
+  <p class="muted">— means unavailable or outside the provider’s reporting window. OpenRouter history requires a management key and excludes today. X reports post counts rather than daily dollar spend. Reports are cached for one minute.</p>
+</main>
+<script type="module" src="/web/admin.js"></script>
+</body>
+</html>

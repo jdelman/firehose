@@ -1,4 +1,4 @@
-import type { GenericPost } from './post.ts';
+import type { AuthorUpdate, GenericPost } from './post.ts';
 
 export type ChannelStats = {
   postsPerSecond: number;
@@ -10,6 +10,8 @@ export type SummaryStatus = 'idle' | 'updating' | 'error';
 
 export type SummarySnapshot = {
   text: string;
+  spotlightPostId?: string;
+  comparison?: string;
   keywords: Record<string, string[]>;
   updatedAt: string | null;
   status: SummaryStatus;
@@ -52,6 +54,7 @@ export type SystemEvent = {
 
 export type ChannelEvent =
   | PostEvent
+  | { type: 'author'; data: AuthorUpdate }
   | StatsEvent
   | SummaryEvent
   | BigramsEvent

@@ -13,7 +13,7 @@ const DEFAULT_ENDPOINT =
 const POST_RECORD_TYPE = 'app.bsky.feed.post';
 const STATUS_INTERVAL_MS = 1000;
 const SUMMARY_INTERVAL_MS = 10_000;
-const SUMMARY_MODEL = 'gpt-5-mini-2025-08-07';
+const SUMMARY_MODEL = 'openai/gpt-6-luna';
 const FOOTER_SUMMARY_LINES = 4;
 const HELP_TEXT = `Stream Bluesky posts from the ATProto firehose.
 
@@ -327,49 +327,14 @@ function padLines(lines, targetLength) {
 }
 
 function extractResponseText(response) {
-  if (typeof response?.output_text === 'string' && response.output_text.trim()) {
-    return response.output_text.trim();
-  }
-
-  if (
-    typeof response?.output_text?.text === 'string' &&
-    response.output_text.text.trim()
-  ) {
-    return response.output_text.text.trim();
-  }
-
-  const output = Array.isArray(response?.output) ? response.output : [];
-  const chunks = [];
-
-  for (const item of output) {
-    const content = Array.isArray(item?.content) ? item.content : [];
-    for (const part of content) {
-      const text =
-        part?.text ??
-        part?.output_text ??
-        part?.content?.[0]?.text ??
-        part?.content?.[0]?.output_text;
-      if (typeof text === 'string' && text.trim()) {
-        chunks.push(text.trim());
-      }
-    }
-  }
-
-  return chunks.join('\n').trim();
+  return response?.choices?.[0]?.message?.content?.trim() ?? '';
 }
 
 function describeResponseWithoutText(response) {
-  const status = response?.status;
-  const reason = response?.incomplete_details?.reason;
-  const outputTypes = Array.isArray(response?.output)
-    ? response.output.map((item) => item?.type).filter(Boolean).join(', ')
-    : 'none';
-
-  if (status === 'incomplete' && reason) {
-    return `summary response incomplete (${reason})`;
+  if (response?.choices?.[0]?.finish_reason === 'length') {
+    return 'summary response incomplete (output token limit reached)';
   }
-
-  return `summary response had no text (status: ${status ?? 'unknown'}, output: ${outputTypes})`;
+  return 'summary response had no text';
 }
 
 function createStatusRenderer({ intervalMs = STATUS_INTERVAL_MS } = {}) {
@@ -489,9 +454,9 @@ function createSummarizer({ enabled, onSummary }) {
     };
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.OPENROUTER_KEY;
   if (!apiKey) {
-    setSummary?.('Summary unavailable: missing OPENAI_API_KEY.');
+    setSummary?.('Summary unavailable: missing OPENROUTER_KEY.');
     setSummaryState?.('');
     return {
       notePost() {},
@@ -521,18 +486,17 @@ function createSummarizer({ enabled, onSummary }) {
 
     const body = {
       model: SUMMARY_MODEL,
-      instructions: preamble,
-      input: posts.join('\n\n'),
+      messages: [
+        { role: 'system', content: preamble },
+        { role: 'user', content: posts.join('\n\n') },
+      ],
       reasoning: {
-        effort: 'minimal',
+        effort: 'none',
       },
-      text: {
-        verbosity: 'low',
-      },
-      max_output_tokens: 120,
+      max_tokens: 120,
     };
 
-    const response = await fetch('https://api.openai.com/v1/responses', {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -542,11 +506,17 @@ function createSummarizer({ enabled, onSummary }) {
       signal: AbortSignal.timeout(15_000),
     });
 
-    if (!response.ok) {
-      throw new Error(`summary request failed with ${response.status}`);
-    }
-
     const data = await response.json();
+    if (!response.ok || data?.error) {
+      const status = data?.error?.code ?? response.status;
+      if (status === 402) {
+        throw new Error('OpenRouter credits or key budget exhausted. Check OpenRouter billing and key limits.');
+      }
+      throw new Error(`OpenRouter summary request failed with ${status}`);
+    }
+    if (data?.choices?.[0]?.finish_reason === 'length') {
+      throw new Error(describeResponseWithoutText(data));
+    }
     const text = extractResponseText(data);
     if (text) {
       return text;

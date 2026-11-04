@@ -1,14 +1,14 @@
 :root {
   --bg: #ffffff;
   --panel: #ffffff;
-  --panel-border: #808080;
+  --panel-border: #aaaaaa;
   --accent: #0000ee;
   --text: #000000;
   --muted: #444444;
   --button-bg: #efefef;
   --button-text: #000000;
   --highlight-bg: #fff7b2;
-  --image-border: #808080;
+  --image-border: #aaaaaa;
   --status-bar-height: 2.4rem;
   font-family: 'Times New Roman', Times, serif;
   color: var(--text);
@@ -29,6 +29,10 @@
 
 * {
   box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 html,
@@ -66,10 +70,10 @@ body {
 }
 
 .filter-form {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(3, 2.25rem);
   align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .filter-form label {
@@ -78,8 +82,9 @@ body {
 }
 
 .filter-form input[type='text'] {
-  flex: 1 1 220px;
-  min-width: 280px;
+  width: 100%;
+  min-width: 0;
+  min-height: 2.25rem;
   padding: 0.3rem 0.4rem;
   border: 1px solid var(--panel-border);
   background: var(--panel);
@@ -88,13 +93,17 @@ body {
 }
 
 .filter-chips {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 0.35rem;
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 1.8rem;
   flex-wrap: wrap;
+}
+
+.filter-chips:empty {
+  display: none;
 }
 
 .filter-chip {
@@ -125,7 +134,10 @@ body {
   text-decoration: underline;
 }
 
-.filter-form button {
+.filter-form button,
+.filter-form select,
+.settings-dialog button,
+.settings-dialog select {
   padding: 0.2rem 0.6rem;
   border: 1px solid var(--panel-border);
   background: var(--button-bg);
@@ -142,6 +154,17 @@ body {
   color: var(--text);
   font-family: 'Courier New', Courier, monospace;
   white-space: nowrap;
+}
+
+@keyframes play-prompt {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .play-prompt {
+    animation: play-prompt 2.8s ease-in-out infinite;
+  }
 }
 
 .toolbar-toggle input {
@@ -176,6 +199,10 @@ body {
   align-items: flex-start;
   gap: 1rem;
   margin-bottom: 0.75rem;
+}
+
+.summary-panel {
+  overflow-y: auto;
 }
 
 .panel-header > * {
@@ -239,6 +266,7 @@ body {
 }
 
 .post-card {
+  flex-shrink: 0;
   padding: 0.5rem 0.6rem;
   border-bottom: 1px solid var(--panel-border);
   background: var(--panel);
@@ -423,6 +451,41 @@ a {
   color: var(--muted);
 }
 
+.rate-sparkline,
+.summary-age-timer {
+  align-self: center;
+  flex: none;
+  color: var(--text);
+}
+
+.rate-sparkline {
+  width: 72px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.sparkline-baseline,
+.summary-timer-track {
+  stroke: var(--panel-border);
+}
+
+.summary-age-timer {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke-width: 2;
+}
+
+.summary-timer-progress {
+  stroke: currentColor;
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+
 .status-item strong,
 .status-system,
 .status-system #system-message {
@@ -516,4 +579,230 @@ a {
     flex-basis: 100%;
     justify-content: flex-end;
   }
+}
+
+
+/* Streamserver: typography, spacing, and palette from not/static/client.css. */
+:root[data-theme='streamserver'] {
+  --accent: #105b63;
+  --highlight-bg: #fffad5;
+  --button-bg: #fffad5;
+  font-family: 'Avenir Next', 'Helvetica Neue', Arial, sans-serif;
+}
+
+:root[data-theme='streamserver'] .toolbar {
+  background: #fffad5;
+}
+
+:root[data-theme='streamserver'] .posts {
+  gap: 0;
+  border: 0;
+}
+
+:root[data-theme='streamserver'] .post-card {
+  flex-shrink: 0;
+  max-width: 800px;
+  padding: 0.6em;
+  margin: 0.4em;
+  border: 0;
+  font-size: 1.2em;
+  line-height: 1.5;
+}
+
+:root[data-theme='streamserver'] .post-meta {
+  display: contents;
+  color: var(--text);
+  font-size: inherit;
+}
+
+:root[data-theme='streamserver'] .post-author {
+  margin-right: 0.5em;
+  font-weight: 500;
+  color: var(--text);
+}
+
+:root[data-theme='streamserver'] .post-card p {
+  display: inline;
+  margin: 0;
+  font-weight: 400;
+  line-height: inherit;
+}
+
+:root[data-theme='streamserver'] .post-card time {
+  margin-left: 0.5em;
+  font-size: 0.7em;
+}
+
+:root[data-theme='streamserver'] .post-card time a {
+  color: #bd4932;
+}
+
+:root[data-theme='streamserver'] .post-source {
+  margin-right: 0.5em;
+  font-size: 0.7em;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+:root[data-theme='streamserver'] .post-link {
+  text-decoration: none;
+}
+
+:root[data-theme='streamserver'] .post-link:hover {
+  text-decoration: underline;
+}
+
+:root[data-theme='streamserver'] .post-mention,
+:root[data-theme='streamserver'] .post-tag {
+  color: #db9e36;
+}
+
+
+@keyframes crazy-fade {
+  0%, 75% { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.crazy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1rem, 4vw, 4rem);
+  color: var(--text);
+  pointer-events: none;
+  overflow: hidden;
+  animation: crazy-fade 3s ease-in forwards;
+}
+
+:root .crazy-overlay .post-card {
+  flex: 0 1 1200px;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0;
+  padding: 0.6em;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  font-size: clamp(1.5rem, 4.5vw, 4.5rem);
+  overflow: hidden;
+}
+
+:root .crazy-overlay .post-meta {
+  font-size: 0.5em;
+}
+
+:root .crazy-overlay .post-source {
+  font-size: inherit;
+}
+
+:root .crazy-overlay .post-images {
+  display: flex;
+  justify-content: center;
+}
+
+:root .crazy-overlay .post-image {
+  max-height: 25vh;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+
+/* Isolate feed layout from the toolbar and avoid delayed mobile tap gestures. */
+.posts {
+  contain: layout paint;
+  overflow-anchor: none;
+}
+
+button, select, input, label {
+  touch-action: manipulation;
+}
+
+
+.filter-form .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+}
+
+.settings-dialog {
+  width: min(420px, calc(100% - 2rem));
+  max-height: calc(100dvh - 2rem);
+  padding: 1.25rem;
+  border: 1px solid var(--panel-border);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  box-shadow: 0 12px 48px #0003;
+  overflow-y: auto;
+}
+
+.settings-dialog::backdrop {
+  background: #0008;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font: bold 1.3rem 'Courier New', Courier, monospace;
+}
+
+.settings-description {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.settings-sites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  margin: 0 0 1.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--panel-border);
+}
+
+.settings-sites legend {
+  padding: 0 0.25rem;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.settings-sites .pill {
+  flex-basis: 100%;
+}
+
+.settings-dialog > .toolbar-toggle {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.settings-dialog select {
+  max-width: 70%;
+}
+
+
+#stream-toggle-button[data-playing='true'] .play-icon,
+#stream-toggle-button[data-playing='false'] .pause-icon {
+  display: none;
+}
+
+
+/* Only the popup card intercepts input; the surrounding overlay stays transparent
+   to taps so the toolbar remains usable. */
+:root .crazy-overlay .post-card {
+  pointer-events: auto;
 }

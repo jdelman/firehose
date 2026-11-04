@@ -1,3 +1,9 @@
+export type AuthorUpdate = {
+  source: string;
+  authorId: string;
+  username: string;
+};
+
 export type PostFacet = {
   byteStart: number;
   byteEnd: number;
@@ -17,7 +23,7 @@ export type GenericPost = {
   source: string;
   channelKey: string;
   authorId: string;
-  username: string;
+  username?: string;
   profileUrl?: string;
   postUrl?: string;
   text: string;
