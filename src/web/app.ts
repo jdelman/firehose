@@ -10,7 +10,7 @@ import { AudioEngine, type SoundTheme } from './audio-engine.js';
 import { CrazyMode } from './crazy-mode.js';
 import { RenderQueue } from './render-queue.js';
 import { bindButtonActivation } from './button-activation.js';
-import { readViewOptions, writeViewOptions, type Mode } from './view-options.js';
+import { readViewOptions, writeViewOptions, type ViewOptions } from './view-options.js';
 
 const MAX_POSTS = 500;
 const RATE_HISTORY_SECONDS = 60;
@@ -26,6 +26,8 @@ function parseTheme(value: string | null): Theme {
 }
 const SOUND_MODE_STORAGE_KEY = 'bluesky.soundMode';
 const MODE_STORAGE_KEY = 'bluesky.mode';
+const SOUND_ENABLED_STORAGE_KEY = 'bluesky.soundEnabled';
+const CRAZY_MODE_STORAGE_KEY = 'bluesky.crazyMode';
 const URL_PATTERN = /https?:\/\/[^\s]+/gi;
 const xEnabled = document.documentElement.dataset.enableX === 'true';
 
@@ -43,7 +45,8 @@ const elements = {
   settingsButton: document.querySelector<HTMLButtonElement>('#settings-button'),
   settingsDialog: document.querySelector<HTMLDialogElement>('#settings-dialog'),
   settingsClose: document.querySelector<HTMLButtonElement>('#settings-close'),
-  modeSelect: document.querySelector<HTMLSelectElement>('#mode-select'),
+  soundToggle: document.querySelector<HTMLInputElement>('#sound-toggle'),
+  crazyToggle: document.querySelector<HTMLInputElement>('#crazy-toggle'),
   themeSelect: document.querySelector<HTMLSelectElement>('#theme-select'),
   showImages: document.querySelector<HTMLInputElement>('#show-images'),
   pinToBottom: document.querySelector<HTMLInputElement>('#pin-to-bottom'),
@@ -110,7 +113,7 @@ let streamActive = false;
 let initialPlayPrompt = false;
 const streamClient = new FilterStreamClient();
 const audioEngine = new AudioEngine();
-const crazyMode = new CrazyMode(elements.posts!, () => streamActive, () => { void audioEngine.playSpotlight(); }, () => summarySnapshot.spotlightPostId);
+const crazyMode = new CrazyMode(elements.posts!, () => streamActive, () => { if (isSoundModeEnabled()) void audioEngine.playSpotlight(); }, () => summarySnapshot.spotlightPostId);
 
 function assertDom() {
   for (const [name, element] of Object.entries(elements)) {
@@ -299,10 +302,10 @@ function applyUrlState() {
   const options = readViewOptions(new URLSearchParams(window.location.search), {
     play: filtersFromUrl.length > 0,
     theme: loadThemePreference(),
-    mode: loadModePreference(),
+    ...loadEffectsPreference(),
   });
   applyTheme(options.theme);
-  applyMode(options.mode);
+  applyEffects(options);
   elements.filterInput!.value = '';
   syncActiveFilters(filtersFromUrl, { updateHistory: false });
 
@@ -569,19 +572,30 @@ function loadThemePreference(): Theme {
   }
 }
 
-function loadModePreference(): Mode {
+function loadEffectsPreference(): Pick<ViewOptions, 'sound' | 'crazy'> {
   try {
+    const params = new URLSearchParams();
     const mode = window.localStorage.getItem(MODE_STORAGE_KEY);
-    if (mode === 'sound' || mode === 'crazy' || mode === 'off') return mode;
-    return window.localStorage.getItem(SOUND_MODE_STORAGE_KEY) === 'true' ? 'sound' : 'off';
+    if (mode) params.set('mode', mode);
+    const sound = window.localStorage.getItem(SOUND_ENABLED_STORAGE_KEY);
+    const crazy = window.localStorage.getItem(CRAZY_MODE_STORAGE_KEY);
+    if (sound !== null) params.set('sound', sound);
+    if (crazy !== null) params.set('crazy', crazy);
+    return readViewOptions(params, {
+      play: false,
+      theme: 'light',
+      sound: window.localStorage.getItem(SOUND_MODE_STORAGE_KEY) === 'true',
+      crazy: false,
+    });
   } catch {
-    return 'off';
+    return { sound: false, crazy: false };
   }
 }
 
-function persistModePreference(value: Mode) {
+function persistEffectsPreference() {
   try {
-    window.localStorage.setItem(MODE_STORAGE_KEY, value);
+    window.localStorage.setItem(SOUND_ENABLED_STORAGE_KEY, String(elements.soundToggle!.checked));
+    window.localStorage.setItem(CRAZY_MODE_STORAGE_KEY, String(elements.crazyToggle!.checked));
   } catch {
     // Ignore storage failures and keep the in-memory setting.
   }
@@ -611,14 +625,18 @@ function layoutPost(article: HTMLElement) {
   }
 }
 
-function applyMode(mode: Mode) {
-  elements.modeSelect!.value = mode;
-  crazyMode.setEnabled(mode === 'crazy');
-  if (mode === 'crazy') void audioEngine.primeSpotlight();
+function applyEffects(options: Pick<ViewOptions, 'sound' | 'crazy'>) {
+  elements.soundToggle!.checked = options.sound;
+  elements.crazyToggle!.checked = options.crazy;
+  crazyMode.setEnabled(options.crazy);
+  if (options.sound) {
+    void audioEngine.prime();
+    if (options.crazy) void audioEngine.primeSpotlight();
+  }
 }
 
 function isSoundModeEnabled(): boolean {
-  return elements.modeSelect!.value === 'sound' || elements.modeSelect!.value === 'crazy';
+  return elements.soundToggle!.checked;
 }
 
 function getFiltersFromUrl(): string[] {
@@ -632,7 +650,8 @@ function updateUrlForFilters(filterTexts: string[], replace = false) {
   writeViewOptions(nextUrl.searchParams, {
     play: streamActive,
     theme: parseTheme(document.documentElement.dataset.theme ?? null),
-    mode: elements.modeSelect!.value as Mode,
+    sound: elements.soundToggle!.checked,
+    crazy: elements.crazyToggle!.checked,
   });
   nextUrl.searchParams.delete('filter');
   for (const filterText of filterTexts) {
@@ -1083,9 +1102,9 @@ function init() {
   const initialOptions = readViewOptions(new URLSearchParams(window.location.search), {
     play: initialFilters.length > 0,
     theme: loadThemePreference(),
-    mode: loadModePreference(),
+    ...loadEffectsPreference(),
   });
-  applyMode(initialOptions.mode);
+  applyEffects(initialOptions);
   applyTheme(initialOptions.theme);
   updateStreamToggleButton();
 
@@ -1136,15 +1155,13 @@ function init() {
     persistThemePreference(nextTheme);
     updateUrlForFilters(activeFilters);
   });
-  elements.modeSelect!.addEventListener('change', () => {
-    const mode = elements.modeSelect!.value as Mode;
-    persistModePreference(mode);
-    applyMode(mode);
-    updateUrlForFilters(activeFilters);
-    if (isSoundModeEnabled()) {
-      void audioEngine.prime();
-    }
-  });
+  for (const toggle of [elements.soundToggle!, elements.crazyToggle!]) {
+    toggle.addEventListener('change', () => {
+      applyEffects({ sound: elements.soundToggle!.checked, crazy: elements.crazyToggle!.checked });
+      persistEffectsPreference();
+      updateUrlForFilters(activeFilters);
+    });
+  }
   window.addEventListener('popstate', () => {
     applyUrlState();
   });
