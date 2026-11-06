@@ -50,7 +50,6 @@ const elements = {
   crazyToggle: document.querySelector<HTMLInputElement>('#crazy-toggle'),
   crazyProgress: document.querySelector<HTMLElement>('#crazy-progress'),
   crazyProgressBar: document.querySelector<HTMLProgressElement>('#crazy-progress-bar'),
-  crazyProgressLabel: document.querySelector<HTMLElement>('#crazy-progress-label'),
   themeSelect: document.querySelector<HTMLSelectElement>('#theme-select'),
   showImages: document.querySelector<HTMLInputElement>('#show-images'),
   pinToBottom: document.querySelector<HTMLInputElement>('#pin-to-bottom'),
@@ -117,7 +116,7 @@ let streamActive = false;
 let initialPlayPrompt = false;
 const streamClient = new FilterStreamClient();
 const audioEngine = new AudioEngine();
-const crazyProgress = new CrazyProgress(elements.crazyProgress!, elements.crazyProgressBar!, elements.crazyProgressLabel!);
+const crazyProgress = new CrazyProgress(elements.crazyProgress!, elements.crazyProgressBar!);
 const crazyMode = new CrazyMode(elements.posts!, () => streamActive, () => { if (isSoundModeEnabled()) void audioEngine.playSpotlight(); }, () => summarySnapshot.spotlightPostId);
 
 function assertDom() {

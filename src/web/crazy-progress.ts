@@ -7,7 +7,6 @@ export class CrazyProgress {
   constructor(
     private readonly container: HTMLElement,
     private readonly bar: HTMLProgressElement,
-    private readonly label: HTMLElement,
   ) {
     this.render();
   }
@@ -48,6 +47,5 @@ export class CrazyProgress {
     this.container.style.setProperty('--shake-angle', `${0.15 + 0.65 * intensity}deg`);
     this.bar.max = this.target;
     this.bar.value = this.posts;
-    this.label.textContent = `${this.posts.toLocaleString('en-US')} / ${this.target.toLocaleString('en-US')} posts`;
   }
 }
