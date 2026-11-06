@@ -10,6 +10,35 @@ function sleep(ms: number) {
 }
 
 describe('ChannelRegistry', () => {
+  test('counts shared streaming clients separately from open Bluesky connections', async () => {
+    let open = true;
+    const registry = new ChannelRegistry({
+      pubsub: new InMemoryPubSubAdapter(),
+      createSource: ({ sources }) => ({
+        start() {}, stop() {},
+        getBlueskyConnectionCount: () => Number(open && sources.includes('bluesky')),
+      }),
+    });
+    expect(registry.getConnections()).toEqual({ blueskyConnections: 0, connectedClients: 0 });
+    const subscriptions = [
+      registry.subscribe({ filterTexts: ['cats'], listener() {} }),
+      registry.subscribe({ filterTexts: ['cats'], listener() {} }),
+      registry.subscribe({ filterTexts: ['dogs'], sources: ['bluesky', 'x'], listener() {} }),
+      registry.subscribe({ filterTexts: [], sources: ['x'], listener() {} }),
+    ];
+    try {
+      expect(registry.getConnections()).toEqual({ blueskyConnections: 2, connectedClients: 4 });
+      open = false;
+      expect(registry.getConnections()).toEqual({ blueskyConnections: 0, connectedClients: 4 });
+      open = true;
+      await subscriptions[0]!.unsubscribe();
+      expect(registry.getConnections()).toEqual({ blueskyConnections: 2, connectedClients: 3 });
+    } finally {
+      for (const subscription of subscriptions.slice(1)) await subscription.unsubscribe();
+    }
+    expect(registry.getConnections()).toEqual({ blueskyConnections: 0, connectedClients: 0 });
+  });
+
   test('shares author updates with channel subscribers without counting them as posts', async () => {
     let callbacks!: SourceCallbacks;
     const registry = new ChannelRegistry({

@@ -33,6 +33,11 @@ type ChannelRecord = {
   statsTimer: Timer | null;
 };
 
+export type AdminConnections = {
+  blueskyConnections: number;
+  connectedClients: number;
+};
+
 export type ChannelSnapshot = {
   systemMessages: string[];
   stats: ChannelStats;
@@ -104,6 +109,16 @@ export class ChannelRegistry {
         }
       },
     };
+  }
+
+  getConnections(): AdminConnections {
+    let blueskyConnections = 0;
+    let connectedClients = 0;
+    for (const channel of this.channels.values()) {
+      blueskyConnections += channel.source.getBlueskyConnectionCount?.() ?? 0;
+      connectedClients += channel.subscriberCount;
+    }
+    return { blueskyConnections, connectedClients };
   }
 
   resetBigrams(filterTexts: string[], sources?: SourceName[]): void {

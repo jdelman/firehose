@@ -33,6 +33,7 @@ describe('admin routes', () => {
     expect(redirect.status).toBe(303);
     expect(redirect.headers.get('location')).toBe('/?next=/admin');
     expect((await routeRequest(request('/admin/usage'), registry)).status).toBe(401);
+    expect((await routeRequest(request('/admin/connections'), registry)).status).toBe(401);
     const login = await routeRequest(request('/?next=/admin', { method: 'POST', body: new URLSearchParams({ password: 'admin-test-password' }) }), registry);
     expect(login.headers.get('location')).toBe('/admin');
     const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
@@ -40,6 +41,21 @@ describe('admin routes', () => {
     expect(page.status).toBe(200);
     expect(page.headers.get('cache-control')).toBe('no-store');
     expect(await page.text()).toContain('Daily usage');
+  });
+
+  test('returns uncached connection counts and places them above API usage', async () => {
+    delete process.env.SITE_PASSWORD;
+    const subscription = registry.subscribe({ filterTexts: [], listener() {} });
+    try {
+      const response = await routeRequest(request('/admin/connections'), registry);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(await response.json()).toEqual({ blueskyConnections: 0, connectedClients: 1 });
+      const page = await (await routeRequest(request('/admin'), registry)).text();
+      expect(page.indexOf('id="connections-title"')).toBeLessThan(page.indexOf('<h2>API usage</h2>'));
+    } finally { await subscription.unsubscribe(); }
+    expect(await (await routeRequest(request('/admin/connections'), registry)).json()).toEqual({ blueskyConnections: 0, connectedClients: 0 });
+    expect((await routeRequest(request('/admin/connections', { method: 'POST' }), registry)).status).toBe(405);
   });
 
   test('serves the admin browser module and rejects writes', async () => {

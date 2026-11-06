@@ -3,6 +3,7 @@ import { logHttpRequest } from './logger.ts';
 import { InMemoryPubSubAdapter } from './pubsub/in-memory-pubsub.ts';
 import { routeRequest } from './routes.ts';
 import { BlueskyFirehoseSource } from './sources/bluesky-firehose.ts';
+import type { PostSourceAdapter } from './sources/source.ts';
 import { XStreamManager } from './sources/x-stream.ts';
 
 export function startServer(port = Number(process.env.PORT ?? 3000)) {
@@ -10,9 +11,10 @@ export function startServer(port = Number(process.env.PORT ?? 3000)) {
   const registry = new ChannelRegistry({
     pubsub: new InMemoryPubSubAdapter(),
     createSource: ({ sources, ...config }) => {
-      const adapters = sources.map(source => source === 'x'
+      const adapters: PostSourceAdapter[] = sources.map(source => source === 'x'
         ? xStream.source(config) : new BlueskyFirehoseSource(config));
       return {
+        getBlueskyConnectionCount() { return adapters.reduce((total, adapter) => total + (adapter.getBlueskyConnectionCount?.() ?? 0), 0); },
         start() { for (const adapter of adapters) adapter.start(); },
         async stop() { await Promise.all(adapters.map(adapter => adapter.stop())); },
       };

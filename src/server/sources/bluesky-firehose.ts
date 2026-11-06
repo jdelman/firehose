@@ -64,6 +64,10 @@ export class BlueskyFirehoseSource implements PostSourceAdapter {
     this.fetcher = config.fetcher ?? fetch;
   }
 
+  getBlueskyConnectionCount(): number {
+    return this.socket?.readyState === WebSocket.OPEN ? 1 : 0;
+  }
+
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;

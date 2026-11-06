@@ -95,18 +95,26 @@ describe('Bluesky firehose recovery and delivery', () => {
   test('reconnects after an abnormal close and resumes delivering posts', async () => {
     const f = await fixture();
     try {
+      expect(f.source.getBlueskyConnectionCount()).toBe(0);
       f.source.start();
+      expect(f.source.getBlueskyConnectionCount()).toBe(0);
       f.source.start(); // Starting twice must not create parallel subscriptions.
       await until(() => f.connections.length === 1);
+      await until(() => f.source.getBlueskyConnectionCount() === 1);
       f.connections[0]!.send(await frame('did:plc:before'));
       await until(() => f.posts.length === 1);
       f.connections[0]!.terminate();
+      await until(() => f.messages.some(message => message.includes('Reconnecting')));
+      expect(f.source.getBlueskyConnectionCount()).toBe(0);
       await until(() => f.connections.length === 2);
+      await until(() => f.source.getBlueskyConnectionCount() === 1);
       f.connections[1]!.send(await frame('did:plc:after'));
       await until(() => f.posts.length === 2);
       expect(f.messages.some(message => message.includes('1006') && message.includes('Reconnecting'))).toBe(true);
       expect(f.messages.filter(message => message.startsWith('Connected'))).toHaveLength(2);
       expect(f.posts[1]?.authorId).toBe('did:plc:after');
+      f.source.stop();
+      expect(f.source.getBlueskyConnectionCount()).toBe(0);
     } finally { await f.close(); }
   });
 

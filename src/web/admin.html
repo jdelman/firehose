@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Firehose — API usage</title>
+  <title>Firehose — Admin</title>
   <link rel="stylesheet" href="/web/styles.css">
   <style>
     body { height: auto; overflow: auto; padding: clamp(1rem, 4vw, 3rem); }
@@ -31,7 +31,17 @@
 <body>
 <main>
   <a href="/">← Firehose</a>
-  <header><div><h1>API usage</h1><p class="muted">Daily usage and remaining credits · USD · UTC dates</p></div><button id="refresh" type="button">Refresh</button></header>
+  <header><h1>Admin</h1><button id="refresh" type="button">Refresh</button></header>
+  <section aria-labelledby="connections-title">
+    <h2 id="connections-title">Connections</h2>
+    <p class="muted">Current connections on this server · Updates every five seconds</p>
+    <div class="balances">
+      <div class="balance"><span>Open Bluesky connections</span><strong class="amount" id="bluesky-connections">—</strong></div>
+      <div class="balance"><span>Connected clients</span><strong class="amount" id="connected-clients">—</strong><p class="muted">Active streaming clients across all channels</p></div>
+    </div>
+    <p id="connections-status" role="status">Loading connections…</p>
+  </section>
+  <header><div><h2>API usage</h2><p class="muted">Daily usage and remaining credits · USD · UTC dates</p></div></header>
   <p id="status" role="status">Loading usage…</p>
   <div class="balances">
     <section class="balance"><h2>X</h2><span class="muted">Remaining account credits</span><strong class="amount" id="x-balance">—</strong><p>Daily usage covers posts read by the X project, including other apps in that project.</p><div id="x-notices"></div><a href="https://console.x.com/" target="_blank" rel="noreferrer noopener">X console ↗</a></section>

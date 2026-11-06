@@ -1,3 +1,4 @@
+import type { AdminConnections } from '../server/channel-registry.ts';
 import type { AdminUsage } from '../server/admin-usage.ts';
 
 const element = (id: string) => document.getElementById(id)!;
@@ -16,6 +17,25 @@ function notices(id: string, messages: string[]) {
     p.textContent = message;
     return p;
   }));
+}
+
+let connectionsPending = false;
+async function refreshConnections() {
+  if (connectionsPending) return;
+  connectionsPending = true;
+  try {
+    const response = await fetch('/admin/connections', { cache: 'no-store' });
+    if (response.status === 401) { window.location.assign('/?next=/admin'); return; }
+    if (!response.ok) throw new Error('Connections could not be loaded. Try refreshing later.');
+    const report = await response.json() as AdminConnections;
+    element('bluesky-connections').textContent = count(report.blueskyConnections);
+    element('connected-clients').textContent = count(report.connectedClients);
+    element('connections-status').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  } catch (error) {
+    element('bluesky-connections').textContent = '—';
+    element('connected-clients').textContent = '—';
+    element('connections-status').textContent = error instanceof Error ? error.message : 'Connections could not be loaded.';
+  } finally { connectionsPending = false; }
 }
 
 async function refresh() {
@@ -44,5 +64,7 @@ async function refresh() {
   } finally { button.disabled = false; }
 }
 
-button.addEventListener('click', () => { void refresh(); });
+button.addEventListener('click', () => { void refreshConnections(); void refresh(); });
+void refreshConnections();
+setInterval(() => { if (!document.hidden) void refreshConnections(); }, 5_000);
 void refresh();

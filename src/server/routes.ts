@@ -18,9 +18,10 @@ export async function routeRequest(request: Request, registry: ChannelRegistry):
   const authResponse = await checkSitePassword(request);
   if (authResponse) return authResponse;
   const url = new URL(request.url);
-  if (url.pathname === '/admin' || url.pathname === '/admin/usage') {
+  if (url.pathname === '/admin' || url.pathname === '/admin/usage' || url.pathname === '/admin/connections') {
     if (request.method !== 'GET') return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET' } });
     if (url.pathname === '/admin') return serveStaticFile('admin.html', 'text/html; charset=utf-8');
+    if (url.pathname === '/admin/connections') return Response.json(registry.getConnections(), { headers: { 'Cache-Control': 'no-store' } });
     return Response.json(await adminUsage.getUsage(), { headers: { 'Cache-Control': 'no-store' } });
   }
   const xEnabled = process.env.ENABLE_X?.trim().toLowerCase() === 'true';

@@ -18,6 +18,7 @@ export type SourceCallbacks = {
 };
 
 export type PostSourceAdapter = {
+  getBlueskyConnectionCount?(): number;
   start(): void | Promise<void>;
   stop(): void | Promise<void>;
 };
