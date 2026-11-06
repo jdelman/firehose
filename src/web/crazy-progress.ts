@@ -37,6 +37,7 @@ export class CrazyProgress {
 
   private render(): void {
     this.container.hidden = !this.enabled;
+    this.container.dataset.shaking = String(this.enabled && this.posts / this.target >= 0.9);
     this.bar.max = this.target;
     this.bar.value = this.posts;
     this.label.textContent = `${this.posts.toLocaleString('en-US')} / ${this.target.toLocaleString('en-US')} posts`;

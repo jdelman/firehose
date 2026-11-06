@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { CrazyProgress } from '../src/web/crazy-progress.ts';
 
 function setup() {
-  const container = { hidden: false };
+  const container = { hidden: false, dataset: {} as Record<string, string> };
   const bar = { max: 0, value: 0 };
   const label = { textContent: '' };
   const progress = new CrazyProgress(container as HTMLElement, bar as HTMLProgressElement, label as HTMLElement);
@@ -20,6 +20,32 @@ describe('Crazy mode post progress', () => {
       }
       expect(label.textContent).toBe(`${target.toLocaleString('en-US')} / ${target.toLocaleString('en-US')} posts`);
     }
+  });
+
+  test('shakes in the last 10% and stops when the next bar starts or progress resets', () => {
+    const { progress, container, bar } = setup();
+    expect(container.dataset.shaking).toBe('false');
+    progress.setEnabled(true);
+    // Complete the first four bars, then reach 14/16 (87.5%).
+    for (let post = 0; post < 1 + 2 + 4 + 8 + 14; post++) progress.notePost();
+    expect(bar).toEqual({ max: 16, value: 14 });
+    expect(container.dataset.shaking).toBe('false');
+    progress.notePost();
+    expect(bar.value).toBe(15);
+    expect(container.dataset.shaking).toBe('true');
+    progress.notePost();
+    expect(container.dataset.shaking).toBe('true');
+    progress.notePost();
+    expect(bar).toEqual({ max: 32, value: 1 });
+    expect(container.dataset.shaking).toBe('false');
+    progress.reset();
+    progress.notePost();
+    expect(container.dataset.shaking).toBe('true');
+    progress.reset();
+    expect(container.dataset.shaking).toBe('false');
+    progress.notePost();
+    progress.setEnabled(false);
+    expect(container.dataset.shaking).toBe('false');
   });
 
   test('only counts in Crazy mode and starts fresh when enabled again', () => {
