@@ -1,4 +1,4 @@
-/** Keep all distinct non-default usernames seen since the application was cleared. */
+/** Keep the 15 most recently seen distinct non-default usernames, newest first. */
 export class SpecialUsernames {
   private readonly usernames = new Map<string, string>();
 
@@ -6,8 +6,12 @@ export class SpecialUsernames {
     const username = value?.trim();
     if (!username) return false;
     const key = username.toLowerCase();
-    if (key.endsWith('.bsky.social') || this.usernames.has(key)) return false;
+    if (key.endsWith('.bsky.social')) return false;
+    this.usernames.delete(key);
     this.usernames.set(key, username);
+    if (this.usernames.size > 15) {
+      this.usernames.delete(this.usernames.keys().next().value!);
+    }
     return true;
   }
 
@@ -16,6 +20,6 @@ export class SpecialUsernames {
   }
 
   toString(): string {
-    return [...this.usernames.values()].join(', ');
+    return [...this.usernames.values()].reverse().join(', ');
   }
 }

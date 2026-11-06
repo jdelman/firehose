@@ -10,26 +10,41 @@ describe('Special usernames', () => {
     expect(names.add(' alice.example.com ')).toBe(true);
     expect(names.add('bsky.social.example')).toBe(true);
     expect(names.add('x_username')).toBe(true);
-    expect(names.toString()).toBe('alice.example.com, bsky.social.example, x_username');
+    expect(names.toString()).toBe('x_username, bsky.social.example, alice.example.com');
   });
 
-  test('includes later-resolved names once, ignoring case and repeated posts', () => {
+  test('moves repeated usernames to the front without duplicates, ignoring case', () => {
     const names = new SpecialUsernames();
     expect(names.add(undefined)).toBe(false);
     expect(names.toString()).toBe('');
+    names.add('Alice.Example');
+    names.add('bob.example');
+    expect(names.toString()).toBe('bob.example, Alice.Example');
     expect(names.add('Alice.Example')).toBe(true);
-    expect(names.add('Alice.Example')).toBe(false);
-    expect(names.add('alice.example')).toBe(false);
-    expect(names.toString()).toBe('Alice.Example');
+    expect(names.toString()).toBe('Alice.Example, bob.example');
+    expect(names.add('alice.example')).toBe(true);
+    expect(names.toString()).toBe('alice.example, bob.example');
   });
 
-  test('retains all seen usernames beyond the visible feed limit and can be cleared', () => {
+  test('retains only the latest 15 usernames, evicting the least recently seen', () => {
     const names = new SpecialUsernames();
-    const expected = Array.from({ length: 1_100 }, (_, index) => `user${index}.example`);
-    for (const name of expected) names.add(name);
-    expect(names.toString()).toBe(expected.join(', '));
+    const seen = Array.from({ length: 16 }, (_, index) => `user${index}.example`);
+    for (const name of seen.slice(0, 15)) names.add(name);
+    names.add(seen[0]); // Refresh the oldest name before adding a new one.
+    names.add(seen[15]);
+    expect(names.toString()).toBe([seen[15], seen[0], ...seen.slice(2, 15).reverse()].join(', '));
+    expect(names.add('ignored.bsky.social')).toBe(false);
+    expect(names.toString().split(', ')).toHaveLength(15);
+    names.add(seen[1]); // An evicted username can return as the newest.
+    expect(names.toString()).toBe([seen[1], seen[15], seen[0], ...seen.slice(3, 15).reverse()].join(', '));
+  });
+
+  test('clears the list and accepts previously seen usernames again', () => {
+    const names = new SpecialUsernames();
+    names.add('alice.example');
     names.clear();
     expect(names.toString()).toBe('');
-    expect(names.add(expected[0])).toBe(true);
+    expect(names.add('alice.example')).toBe(true);
+    expect(names.toString()).toBe('alice.example');
   });
 });
