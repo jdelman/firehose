@@ -39,6 +39,20 @@ describe('Special usernames', () => {
     expect(names.toString()).toBe([seen[1], seen[15], seen[0], ...seen.slice(3, 15).reverse()].join(', '));
   });
 
+  test('links usernames to the correct platform and keeps identical cross-platform handles separate', () => {
+    const names = new SpecialUsernames();
+    names.add('alice.example');
+    names.add('alice.example', 'x');
+    names.add('name/with?characters', 'x');
+    expect(names.entries()).toEqual([
+      { username: 'name/with?characters', profileUrl: 'https://x.com/name%2Fwith%3Fcharacters' },
+      { username: 'alice.example', profileUrl: 'https://x.com/alice.example' },
+      { username: 'alice.example', profileUrl: 'https://bsky.app/profile/alice.example' },
+    ]);
+    names.add('alice.example');
+    expect(names.entries()[0]).toEqual({ username: 'alice.example', profileUrl: 'https://bsky.app/profile/alice.example' });
+  });
+
   test('clears the list and accepts previously seen usernames again', () => {
     const names = new SpecialUsernames();
     names.add('alice.example');

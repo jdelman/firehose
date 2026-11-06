@@ -244,7 +244,7 @@ function connect(filterTexts: string[], options: { updateHistory?: boolean } = {
       setSystemMessage('Stream interrupted. Reconnecting...');
     },
     onPost: (post: GenericPost) => {
-      noteSpecialUsername(post.username);
+      noteSpecialUsername(post.username, post.source);
       crazyProgress.notePost();
       postQueue.enqueue(post);
     },
@@ -456,12 +456,12 @@ function authorKey(source: string, authorId: string): string {
   return JSON.stringify([source, authorId]);
 }
 
-function noteSpecialUsername(username: string | undefined) {
-  if (specialUsernames.add(username)) specialUsernamesDirty = true;
+function noteSpecialUsername(username: string | undefined, source: string | undefined) {
+  if (specialUsernames.add(username, source)) specialUsernamesDirty = true;
 }
 
 function updateAuthor(author: AuthorUpdate) {
-  noteSpecialUsername(author.username);
+  noteSpecialUsername(author.username, author.source);
   const key = authorKey(author.source, author.authorId);
   authorNames.delete(key);
   authorNames.set(key, author.username);
@@ -472,7 +472,14 @@ function updateAuthor(author: AuthorUpdate) {
 function renderPendingUpdates() {
   if (specialUsernamesDirty) {
     specialUsernamesDirty = false;
-    elements.specialUsernames!.textContent = specialUsernames.toString();
+    elements.specialUsernames!.replaceChildren(...specialUsernames.entries().flatMap((entry, index) => {
+      const link = document.createElement('a');
+      link.textContent = entry.username;
+      link.href = entry.profileUrl;
+      link.target = '_blank';
+      link.rel = 'noreferrer noopener';
+      return index ? [document.createTextNode(', '), link] : [link];
+    }));
   }
   if (pendingStats) {
     const stats = pendingStats;
