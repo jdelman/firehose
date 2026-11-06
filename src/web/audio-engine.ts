@@ -1,5 +1,8 @@
 export type SoundTheme = 'light' | 'dark' | 'streamserver';
 
+// Version the URL so browsers do not reuse the previously trimmed clip.
+const SPOTLIGHT_SOUND = '/sounds/faa.m4a?v=clean-fade-full';
+
 const MIN_SOUND_INTERVAL_SECONDS = 1 / 12;
 const PENTATONIC_NOTES = [523.25, 587.33, 659.25, 783.99, 880, 1046.5];
 
@@ -24,7 +27,7 @@ export class AudioEngine {
   }
 
   primeSpotlight(): Promise<void> {
-    return this.primeClip('/sounds/faa.m4a');
+    return this.primeClip(SPOTLIGHT_SOUND);
   }
 
   primeProgressComplete(): Promise<void> {
@@ -41,7 +44,7 @@ export class AudioEngine {
   }
 
   playSpotlight(): Promise<void> {
-    return this.playClip('/sounds/faa.m4a');
+    return this.playClip(SPOTLIGHT_SOUND);
   }
 
   playProgressComplete(): Promise<void> {

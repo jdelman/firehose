@@ -25,6 +25,9 @@ describe('admin routes', () => {
     const head = await routeRequest(request(`/sounds/${clip}.m4a`, { method: 'HEAD' }), registry);
     expect(head.headers.get('Content-Length')).toBe(String(bytes.byteLength));
     expect(await head.text()).toBe('');
+    const versioned = await routeRequest(request(`/sounds/${clip}.m4a?v=clean-fade-full`), registry);
+    expect(versioned.status).toBe(200);
+    expect(new Uint8Array(await versioned.arrayBuffer())).toEqual(bytes);
     const write = await routeRequest(request(`/sounds/${clip}.m4a`, { method: 'POST' }), registry);
     expect(write.status).toBe(405);
     expect(write.headers.get('Allow')).toBe('GET, HEAD');
