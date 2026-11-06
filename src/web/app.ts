@@ -10,6 +10,7 @@ import { AudioEngine, type SoundTheme } from './audio-engine.js';
 import { CrazyMode } from './crazy-mode.js';
 import { CrazyProgress } from './crazy-progress.js';
 import { RenderQueue } from './render-queue.js';
+import { SpecialUsernames } from './special-usernames.js';
 import { bindButtonActivation } from './button-activation.js';
 import { readViewOptions, writeViewOptions, type ViewOptions } from './view-options.js';
 
@@ -70,6 +71,7 @@ const elements = {
   comparisonStatus: document.querySelector<HTMLElement>('#comparison-status'),
   bigramsList: document.querySelector<HTMLOListElement>('#bigrams-list'),
   keywordsList: document.querySelector<HTMLOListElement>('#keywords-list'),
+  specialUsernames: document.querySelector<HTMLElement>('#special-usernames'),
   systemMessage: document.querySelector<HTMLElement>('#system-message'),
 };
 
@@ -107,6 +109,8 @@ let currentPostsPerSecond = 0;
 let pendingStats: ChannelStats | null = null;
 let postFragment: DocumentFragment | null = null;
 const authorNames = new Map<string, string>();
+const specialUsernames = new SpecialUsernames();
+let specialUsernamesDirty = false;
 const postImages = new WeakMap<HTMLElement, GenericPost['images']>();
 let authorsDirty = false;
 const postQueue = new RenderQueue<GenericPost>(renderQueuedPost, commitRenderedPosts, MAX_POSTS);
@@ -240,6 +244,7 @@ function connect(filterTexts: string[], options: { updateHistory?: boolean } = {
       setSystemMessage('Stream interrupted. Reconnecting...');
     },
     onPost: (post: GenericPost) => {
+      noteSpecialUsername(post.username);
       crazyProgress.notePost();
       postQueue.enqueue(post);
     },
@@ -365,6 +370,9 @@ function updateStreamToggleButton() {
 }
 
 function resetAppState() {
+  specialUsernames.clear();
+  specialUsernamesDirty = false;
+  elements.specialUsernames!.textContent = 'No special usernames seen yet.';
   crazyProgress.reset();
   renderSourceComparison();
   summarySnapshot = {
@@ -448,7 +456,12 @@ function authorKey(source: string, authorId: string): string {
   return JSON.stringify([source, authorId]);
 }
 
+function noteSpecialUsername(username: string | undefined) {
+  if (specialUsernames.add(username)) specialUsernamesDirty = true;
+}
+
 function updateAuthor(author: AuthorUpdate) {
+  noteSpecialUsername(author.username);
   const key = authorKey(author.source, author.authorId);
   authorNames.delete(key);
   authorNames.set(key, author.username);
@@ -457,6 +470,10 @@ function updateAuthor(author: AuthorUpdate) {
 }
 
 function renderPendingUpdates() {
+  if (specialUsernamesDirty) {
+    specialUsernamesDirty = false;
+    elements.specialUsernames!.textContent = specialUsernames.toString();
+  }
   if (pendingStats) {
     const stats = pendingStats;
     pendingStats = null;
