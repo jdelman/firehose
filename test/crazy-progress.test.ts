@@ -10,10 +10,10 @@ function setup() {
 }
 
 describe('Crazy mode post progress', () => {
-  test('fills successive bars with 10, 100, 1,000, and 10,000 incoming posts', () => {
+  test('fills successive bars with 1, 2, 4, 8, and 16 incoming posts', () => {
     const { progress, bar, label } = setup();
     progress.setEnabled(true);
-    for (const target of [10, 100, 1_000, 10_000]) {
+    for (const target of [1, 2, 4, 8, 16]) {
       for (let post = 1; post <= target; post++) {
         progress.notePost();
         expect(bar).toEqual({ max: target, value: post });
@@ -35,17 +35,17 @@ describe('Crazy mode post progress', () => {
     progress.setEnabled(false);
     progress.notePost();
     progress.setEnabled(true);
-    expect(bar).toEqual({ max: 10, value: 0 });
+    expect(bar).toEqual({ max: 1, value: 0 });
   });
 
   test('clearing the application resets the target while preserving visibility', () => {
     const { progress, container, bar, label } = setup();
     progress.setEnabled(true);
-    for (let post = 0; post < 11; post++) progress.notePost();
-    expect(bar).toEqual({ max: 100, value: 1 });
+    for (let post = 0; post < 2; post++) progress.notePost();
+    expect(bar).toEqual({ max: 2, value: 1 });
     progress.reset();
-    expect(bar).toEqual({ max: 10, value: 0 });
-    expect(label.textContent).toBe('0 / 10 posts');
+    expect(bar).toEqual({ max: 1, value: 0 });
+    expect(label.textContent).toBe('0 / 1 posts');
     expect(container.hidden).toBe(false);
   });
 });

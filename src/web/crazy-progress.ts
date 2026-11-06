@@ -1,8 +1,8 @@
-/** Successive bars require 10, 100, 1,000, ... new posts each. */
+/** Successive bars require 1, 2, 4, 8, ... new posts each. */
 export class CrazyProgress {
   private enabled = false;
   private posts = 0;
-  private target = 10;
+  private target = 1;
 
   constructor(
     private readonly container: HTMLElement,
@@ -20,7 +20,7 @@ export class CrazyProgress {
 
   reset(): void {
     this.posts = 0;
-    this.target = 10;
+    this.target = 1;
     this.render();
   }
 
@@ -29,7 +29,7 @@ export class CrazyProgress {
     // Leave a completed bar full until the next post starts the next bar.
     if (this.posts === this.target) {
       this.posts = 0;
-      this.target *= 10;
+      this.target *= 2;
     }
     this.posts++;
     this.render();
