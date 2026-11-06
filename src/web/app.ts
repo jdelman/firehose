@@ -8,6 +8,7 @@ import {
 } from './stream-client.js';
 import { AudioEngine, type SoundTheme } from './audio-engine.js';
 import { CrazyMode } from './crazy-mode.js';
+import { CrazyProgress } from './crazy-progress.js';
 import { RenderQueue } from './render-queue.js';
 import { bindButtonActivation } from './button-activation.js';
 import { readViewOptions, writeViewOptions, type ViewOptions } from './view-options.js';
@@ -47,6 +48,9 @@ const elements = {
   settingsClose: document.querySelector<HTMLButtonElement>('#settings-close'),
   soundToggle: document.querySelector<HTMLInputElement>('#sound-toggle'),
   crazyToggle: document.querySelector<HTMLInputElement>('#crazy-toggle'),
+  crazyProgress: document.querySelector<HTMLElement>('#crazy-progress'),
+  crazyProgressBar: document.querySelector<HTMLProgressElement>('#crazy-progress-bar'),
+  crazyProgressLabel: document.querySelector<HTMLElement>('#crazy-progress-label'),
   themeSelect: document.querySelector<HTMLSelectElement>('#theme-select'),
   showImages: document.querySelector<HTMLInputElement>('#show-images'),
   pinToBottom: document.querySelector<HTMLInputElement>('#pin-to-bottom'),
@@ -113,6 +117,7 @@ let streamActive = false;
 let initialPlayPrompt = false;
 const streamClient = new FilterStreamClient();
 const audioEngine = new AudioEngine();
+const crazyProgress = new CrazyProgress(elements.crazyProgress!, elements.crazyProgressBar!, elements.crazyProgressLabel!);
 const crazyMode = new CrazyMode(elements.posts!, () => streamActive, () => { if (isSoundModeEnabled()) void audioEngine.playSpotlight(); }, () => summarySnapshot.spotlightPostId);
 
 function assertDom() {
@@ -236,6 +241,7 @@ function connect(filterTexts: string[], options: { updateHistory?: boolean } = {
       setSystemMessage('Stream interrupted. Reconnecting...');
     },
     onPost: (post: GenericPost) => {
+      crazyProgress.notePost();
       postQueue.enqueue(post);
     },
     onAuthor: updateAuthor,
@@ -360,6 +366,7 @@ function updateStreamToggleButton() {
 }
 
 function resetAppState() {
+  crazyProgress.reset();
   renderSourceComparison();
   summarySnapshot = {
     text: 'Waiting for the first 10-second window.',
@@ -629,6 +636,7 @@ function applyEffects(options: Pick<ViewOptions, 'sound' | 'crazy'>) {
   elements.soundToggle!.checked = options.sound;
   elements.crazyToggle!.checked = options.crazy;
   crazyMode.setEnabled(options.crazy);
+  crazyProgress.setEnabled(options.crazy);
   if (options.sound) {
     void audioEngine.prime();
     if (options.crazy) void audioEngine.primeSpotlight();

@@ -806,3 +806,31 @@ button, select, input, label {
 :root .crazy-overlay .post-card {
   pointer-events: auto;
 }
+
+.crazy-progress {
+  flex-shrink: 0;
+}
+
+.crazy-progress progress {
+  display: block;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 60px;
+  border: 1px solid var(--panel-border);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--accent);
+}
+
+.crazy-progress progress::-webkit-progress-bar {
+  background: var(--panel);
+}
+
+.crazy-progress progress::-webkit-progress-value {
+  background: var(--accent);
+}
+
+.crazy-progress progress::-moz-progress-bar {
+  background: var(--accent);
+}
