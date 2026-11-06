@@ -24,11 +24,11 @@ export class AudioEngine {
   }
 
   primeSpotlight(): Promise<void> {
-    return this.primeClip('/sounds/gunshot.m4a');
+    return this.primeClip('/sounds/faa.m4a');
   }
 
   primeProgressComplete(): Promise<void> {
-    return this.primeClip('/sounds/faa.m4a');
+    return this.primeClip('/sounds/gunshot.m4a');
   }
 
   private async primeClip(path: string): Promise<void> {
@@ -41,11 +41,11 @@ export class AudioEngine {
   }
 
   playSpotlight(): Promise<void> {
-    return this.playClip('/sounds/gunshot.m4a');
+    return this.playClip('/sounds/faa.m4a');
   }
 
   playProgressComplete(): Promise<void> {
-    return this.playClip('/sounds/faa.m4a');
+    return this.playClip('/sounds/gunshot.m4a');
   }
 
   private async playClip(path: string): Promise<void> {

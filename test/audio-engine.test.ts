@@ -56,7 +56,7 @@ describe('audio under load', () => {
     const { audio, context } = setup();
     let requests = 0;
     globalThis.fetch = (async input => {
-      expect(input).toBe('/sounds/gunshot.m4a');
+      expect(input).toBe('/sounds/faa.m4a');
       requests++;
       return new Response(new Uint8Array([1, 2, 3]));
     }) as typeof fetch;
@@ -83,7 +83,7 @@ describe('audio under load', () => {
       return new Response(new Uint8Array([1, 2, 3]));
     }) as typeof fetch;
     await Promise.all([audio.primeProgressComplete(), audio.primeSpotlight()]);
-    expect(requests.sort()).toEqual(['/sounds/faa.m4a', '/sounds/gunshot.m4a']);
+    expect(requests).toEqual(['/sounds/gunshot.m4a', '/sounds/faa.m4a']);
     expect(context.bufferSources).toHaveLength(0);
     await Promise.all(Array.from({ length: 5 }, () => audio.playProgressComplete()));
     expect(requests).toHaveLength(2);
