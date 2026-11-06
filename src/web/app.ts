@@ -9,6 +9,7 @@ import {
 import { AudioEngine, type SoundTheme } from './audio-engine.js';
 import { CrazyMode } from './crazy-mode.js';
 import { CrazyProgress } from './crazy-progress.js';
+import { CrazyRateMeter } from './crazy-rate-meter.js';
 import { RenderQueue } from './render-queue.js';
 import { SpecialUsernames } from './special-usernames.js';
 import { bindButtonActivation } from './button-activation.js';
@@ -51,6 +52,11 @@ const elements = {
   crazyToggle: document.querySelector<HTMLInputElement>('#crazy-toggle'),
   crazyProgress: document.querySelector<HTMLElement>('#crazy-progress'),
   crazyProgressBar: document.querySelector<HTMLProgressElement>('#crazy-progress-bar'),
+  crazyRateMeter: document.querySelector<HTMLElement>('#crazy-rate-meter'),
+  crazyRateGauge: document.querySelector<SVGSVGElement>('#crazy-rate-gauge'),
+  crazyRateNeedle: document.querySelector<SVGGElement>('#crazy-rate-needle'),
+  crazyRateTarget: document.querySelector<SVGTextElement>('#crazy-rate-target'),
+  crazyRateLabel: document.querySelector<HTMLElement>('#crazy-rate-label'),
   themeSelect: document.querySelector<HTMLSelectElement>('#theme-select'),
   showImages: document.querySelector<HTMLInputElement>('#show-images'),
   pinToBottom: document.querySelector<HTMLInputElement>('#pin-to-bottom'),
@@ -121,6 +127,10 @@ let initialPlayPrompt = false;
 const streamClient = new FilterStreamClient();
 const audioEngine = new AudioEngine();
 const crazyProgress = new CrazyProgress(elements.crazyProgress!, elements.crazyProgressBar!);
+const crazyRateMeter = new CrazyRateMeter(
+  elements.crazyRateMeter!, elements.crazyRateGauge!, elements.crazyRateNeedle!,
+  elements.crazyRateTarget!, elements.crazyRateLabel!,
+);
 const crazyMode = new CrazyMode(elements.posts!, () => streamActive, () => { if (isSoundModeEnabled()) void audioEngine.playSpotlight(); }, () => summarySnapshot.spotlightPostId);
 
 function assertDom() {
@@ -214,6 +224,7 @@ function syncActiveFilters(
 }
 
 function connect(filterTexts: string[], options: { updateHistory?: boolean } = {}) {
+  crazyRateMeter.setRate(0);
   crazyMode.clearOverlay();
   postQueue.clear();
   postFragment = null;
@@ -288,6 +299,7 @@ function connect(filterTexts: string[], options: { updateHistory?: boolean } = {
 function stopStream(config: { keepPosts?: boolean; message?: string; updateHistory?: boolean } = {}) {
   streamStopped = true;
   streamActive = false;
+  crazyRateMeter.setRate(0);
   postQueue.clear();
   postFragment = null;
   pendingStats = null;
@@ -374,6 +386,7 @@ function resetAppState() {
   specialUsernamesDirty = false;
   elements.specialUsernames!.textContent = 'No special usernames seen yet.';
   crazyProgress.reset();
+  crazyRateMeter.setRate(0);
   renderSourceComparison();
   summarySnapshot = {
     text: 'Waiting for the first 10-second window.',
@@ -484,6 +497,7 @@ function renderPendingUpdates() {
   if (pendingStats) {
     const stats = pendingStats;
     pendingStats = null;
+    crazyRateMeter.setRate(stats.postsPerSecond);
     const second = Math.floor(Date.now() / 1_000);
     const latest = rateHistory.at(-1);
     if (latest?.second === second) latest.rate = stats.postsPerSecond;
@@ -660,6 +674,7 @@ function applyEffects(options: Pick<ViewOptions, 'sound' | 'crazy'>) {
   elements.crazyToggle!.checked = options.crazy;
   crazyMode.setEnabled(options.crazy);
   crazyProgress.setEnabled(options.crazy);
+  crazyRateMeter.setEnabled(options.crazy);
   if (options.sound) {
     void audioEngine.prime();
     if (options.crazy) void audioEngine.primeSpotlight();

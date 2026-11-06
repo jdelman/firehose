@@ -49,6 +49,29 @@
           <section id="crazy-progress" class="summary-card crazy-progress" hidden>
             <progress id="crazy-progress-bar" max="1" value="0" aria-label="Crazy mode post progress"></progress>
           </section>
+          <section id="crazy-rate-meter" class="summary-card crazy-rate-meter" hidden>
+            <span class="stat-label">Rate target</span>
+            <svg id="crazy-rate-gauge" viewBox="0 -25 300 190" role="meter" aria-label="Posts per second target gauge">
+              <path class="rate-dial-track" d="M43.7 101.5 A110 110 0 0 1 256.3 101.5" />
+              <path class="rate-dial-goal" d="M142.8 20.2 A110 110 0 0 1 157.2 20.2" />
+              <g class="rate-dial-ticks" aria-hidden="true">
+                <path d="M150 20 V30" transform="rotate(-75 150 130)" />
+                <path d="M150 20 V27" transform="rotate(-50 150 130)" />
+                <path d="M150 20 V27" transform="rotate(-25 150 130)" />
+                <path d="M150 16 V30" />
+                <path d="M150 20 V27" transform="rotate(25 150 130)" />
+                <path d="M150 20 V27" transform="rotate(50 150 130)" />
+                <path d="M150 20 V30" transform="rotate(75 150 130)" />
+              </g>
+              <text id="crazy-rate-target" class="rate-dial-target" x="150" y="8" text-anchor="middle"></text>
+              <text class="rate-dial-caption" x="150" y="158" text-anchor="middle">posts/sec · ±5%</text>
+              <g id="crazy-rate-needle" class="rate-dial-needle" transform="rotate(-75 150 130)">
+                <path d="M150 130 V36" />
+                <circle cx="150" cy="130" r="5" />
+              </g>
+            </svg>
+            <p id="crazy-rate-label" class="rate-dial-readout">0.00 posts/sec · Below target</p>
+          </section>
           <section class="summary-card">
             <div class="summary-meta">
               <span class="stat-label">Summary</span>

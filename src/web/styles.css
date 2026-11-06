@@ -847,3 +847,70 @@ button, select, input, label {
     animation: crazy-progress-shake var(--shake-duration) linear infinite;
   }
 }
+
+.crazy-rate-meter {
+  flex-shrink: 0;
+}
+
+.crazy-rate-meter svg {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+  overflow: visible;
+}
+
+.rate-dial-track, .rate-dial-goal, .rate-dial-ticks path {
+  fill: none;
+  stroke: var(--panel-border);
+}
+
+.rate-dial-track, .rate-dial-goal {
+  stroke-width: 8;
+}
+
+.rate-dial-goal {
+  stroke: #16803c;
+}
+
+.rate-dial-ticks path {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.rate-dial-target, .rate-dial-caption {
+  fill: var(--text);
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.rate-dial-target {
+  font-size: 30px;
+  font-weight: bold;
+}
+
+.rate-dial-caption {
+  font-size: 11px;
+}
+
+.rate-dial-needle {
+  color: #e53935;
+}
+
+.crazy-rate-meter[data-on-target='true'] .rate-dial-needle {
+  color: #16803c;
+}
+
+.rate-dial-needle path {
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.rate-dial-needle circle {
+  fill: currentColor;
+}
+
+.rate-dial-readout {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
