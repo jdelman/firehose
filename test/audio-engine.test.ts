@@ -75,6 +75,42 @@ describe('audio under load', () => {
     }
   });
 
+  test('preloads completion audio separately and plays every completion even in bursts', async () => {
+    const { audio, context } = setup();
+    const requests: string[] = [];
+    globalThis.fetch = (async input => {
+      requests.push(String(input));
+      return new Response(new Uint8Array([1, 2, 3]));
+    }) as typeof fetch;
+    await Promise.all([audio.primeProgressComplete(), audio.primeSpotlight()]);
+    expect(requests.sort()).toEqual(['/sounds/faa.m4a', '/sounds/gunshot.m4a']);
+    expect(context.bufferSources).toHaveLength(0);
+    await Promise.all(Array.from({ length: 5 }, () => audio.playProgressComplete()));
+    expect(requests).toHaveLength(2);
+    expect(context.decodes).toBe(2);
+    expect(context.bufferSources).toHaveLength(5);
+    for (const node of context.bufferSources) {
+      expect(node.connections[0]!.connections[0]).toBe(context.compressors[0]);
+      node.ended!();
+      expect(node.disconnected).toBe(true);
+      expect(node.connections[0]!.disconnected).toBe(true);
+    }
+  });
+
+  test('retries unavailable completion audio without interrupting progress', async () => {
+    const { audio, context } = setup();
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts++;
+      return attempts === 1 ? new Response(null, { status: 404 }) : new Response(new Uint8Array([1, 2, 3]));
+    }) as typeof fetch;
+    await audio.playProgressComplete();
+    expect(context.bufferSources).toHaveLength(0);
+    await audio.playProgressComplete();
+    expect(attempts).toBe(2);
+    expect(context.bufferSources).toHaveLength(1);
+  });
+
   test('an unavailable spotlight clip does not break the mode', async () => {
     const { audio, context } = setup();
     globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;

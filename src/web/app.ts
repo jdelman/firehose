@@ -126,7 +126,9 @@ let streamActive = false;
 let initialPlayPrompt = false;
 const streamClient = new FilterStreamClient();
 const audioEngine = new AudioEngine();
-const crazyProgress = new CrazyProgress(elements.crazyProgress!, elements.crazyProgressBar!);
+const crazyProgress = new CrazyProgress(elements.crazyProgress!, elements.crazyProgressBar!, () => {
+  if (isSoundModeEnabled()) void audioEngine.playProgressComplete().catch(() => {});
+});
 const crazyRateMeter = new CrazyRateMeter(
   elements.crazyRateMeter!, elements.crazyRateGauge!, elements.crazyRateNeedle!,
   elements.crazyRateTarget!, elements.crazyRateLabel!,
@@ -677,7 +679,10 @@ function applyEffects(options: Pick<ViewOptions, 'sound' | 'crazy'>) {
   crazyRateMeter.setEnabled(options.crazy);
   if (options.sound) {
     void audioEngine.prime();
-    if (options.crazy) void audioEngine.primeSpotlight();
+    if (options.crazy) {
+      void audioEngine.primeSpotlight();
+      void audioEngine.primeProgressComplete().catch(() => {});
+    }
   }
 }
 

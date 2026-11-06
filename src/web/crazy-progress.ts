@@ -7,6 +7,7 @@ export class CrazyProgress {
   constructor(
     private readonly container: HTMLElement,
     private readonly bar: HTMLProgressElement,
+    private readonly onComplete: () => void = () => {},
   ) {
     this.render();
   }
@@ -32,6 +33,7 @@ export class CrazyProgress {
     }
     this.posts++;
     this.render();
+    if (this.posts === this.target) this.onComplete();
   }
 
   private render(): void {

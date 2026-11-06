@@ -12,19 +12,22 @@ const registry = new ChannelRegistry({ pubsub: new InMemoryPubSubAdapter(), crea
 const request = (path: string, options?: RequestInit) => new Request(`https://firehose.test${path}`, options);
 
 describe('admin routes', () => {
-  test('serves the bundled spotlight audio and protects it with the site password', async () => {
+  test.each(['gunshot', 'faa'])('serves the bundled %s audio and protects it with the site password', async (clip) => {
     process.env.SITE_PASSWORD = 'test';
-    expect((await routeRequest(request('/sounds/gunshot.m4a'), registry)).status).not.toBe(200);
+    expect((await routeRequest(request(`/sounds/${clip}.m4a`), registry)).status).not.toBe(200);
     delete process.env.SITE_PASSWORD;
-    const response = await routeRequest(request('/sounds/gunshot.m4a'), registry);
+    const response = await routeRequest(request(`/sounds/${clip}.m4a`), registry);
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('audio/mp4');
     const bytes = new Uint8Array(await response.arrayBuffer());
     expect(bytes.byteLength).toBeGreaterThan(1_000);
     expect(new TextDecoder().decode(bytes.slice(4, 8))).toBe('ftyp');
-    const head = await routeRequest(request('/sounds/gunshot.m4a', { method: 'HEAD' }), registry);
+    const head = await routeRequest(request(`/sounds/${clip}.m4a`, { method: 'HEAD' }), registry);
     expect(head.headers.get('Content-Length')).toBe(String(bytes.byteLength));
     expect(await head.text()).toBe('');
+    const write = await routeRequest(request(`/sounds/${clip}.m4a`, { method: 'POST' }), registry);
+    expect(write.status).toBe(405);
+    expect(write.headers.get('Allow')).toBe('GET, HEAD');
   });
 
   test('requires sign-in and returns to admin after unlocking', async () => {

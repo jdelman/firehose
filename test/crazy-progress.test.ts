@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { CrazyProgress } from '../src/web/crazy-progress.ts';
 
-function setup() {
+function setup(onComplete = () => {}) {
   const properties = new Map<string, string>();
   const container = {
     hidden: false, dataset: {} as Record<string, string>,
     style: { setProperty: (name: string, value: string) => { properties.set(name, value); } },
   };
   const bar = { max: 0, value: 0 };
-  const progress = new CrazyProgress(container as unknown as HTMLElement, bar as HTMLProgressElement);
+  const progress = new CrazyProgress(container as unknown as HTMLElement, bar as HTMLProgressElement, onComplete);
   return { container, bar, progress, properties };
 }
 
@@ -22,6 +22,31 @@ describe('Crazy mode post progress', () => {
         expect(bar).toEqual({ max: target, value: post });
       }
     }
+  });
+
+  test('signals each completed bar once, never for partial progress, reset, or disabled posts', () => {
+    let completions = 0;
+    const { progress } = setup(() => { completions++; });
+    progress.notePost();
+    expect(completions).toBe(0);
+    progress.setEnabled(true);
+    for (const [index, target] of [1, 2, 4, 8, 16].entries()) {
+      for (let post = 1; post < target; post++) {
+        progress.notePost();
+        expect(completions).toBe(index);
+      }
+      progress.notePost();
+      expect(completions).toBe(index + 1);
+      progress.setEnabled(true);
+      expect(completions).toBe(index + 1);
+    }
+    progress.reset();
+    progress.setEnabled(false);
+    progress.notePost();
+    expect(completions).toBe(5);
+    progress.setEnabled(true);
+    progress.notePost();
+    expect(completions).toBe(6);
   });
 
   test('starts after 25%, accelerates gently then sharply, and stops on rollover or reset', () => {

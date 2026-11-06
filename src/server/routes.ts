@@ -35,11 +35,11 @@ export async function routeRequest(request: Request, registry: ChannelRegistry):
     });
   }
 
-  if (url.pathname === '/sounds/gunshot.m4a') {
+  if (url.pathname === '/sounds/gunshot.m4a' || url.pathname === '/sounds/faa.m4a') {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
     }
-    const file = Bun.file(join(import.meta.dir, '../../sounds/gunshot.m4a'));
+    const file = Bun.file(join(import.meta.dir, '../..', url.pathname.slice(1)));
     return new Response(request.method === 'HEAD' ? null : file, {
       headers: { 'Content-Type': 'audio/mp4', 'Content-Length': String(file.size), 'Cache-Control': 'public, max-age=3600' },
     });

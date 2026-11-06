@@ -10,7 +10,7 @@ export class AudioEngine {
   private reverb: ConvolverNode | null = null;
   private nextSoundAt = -Infinity;
   private melodyStep = 0;
-  private spotlightBuffer: Promise<AudioBuffer | null> | null = null;
+  private clipBuffers = new Map<string, Promise<AudioBuffer | null>>();
 
   async prime(): Promise<void> {
     const context = this.getContext();
@@ -23,20 +23,36 @@ export class AudioEngine {
     }
   }
 
-  async primeSpotlight(): Promise<void> {
+  primeSpotlight(): Promise<void> {
+    return this.primeClip('/sounds/gunshot.m4a');
+  }
+
+  primeProgressComplete(): Promise<void> {
+    return this.primeClip('/sounds/faa.m4a');
+  }
+
+  private async primeClip(path: string): Promise<void> {
     const context = this.getContext();
     if (!context) return;
     // Start the download before waiting for a user gesture to unlock audio.
-    const loaded = this.loadSpotlight(context);
+    const loaded = this.loadClip(context, path);
     await this.prime();
     await loaded;
   }
 
-  async playSpotlight(): Promise<void> {
+  playSpotlight(): Promise<void> {
+    return this.playClip('/sounds/gunshot.m4a');
+  }
+
+  playProgressComplete(): Promise<void> {
+    return this.playClip('/sounds/faa.m4a');
+  }
+
+  private async playClip(path: string): Promise<void> {
     const context = this.getContext();
     if (!context) return;
     await this.prime();
-    const buffer = await this.loadSpotlight(context);
+    const buffer = await this.loadClip(context, path);
     if (!buffer || context.state !== 'running') return;
     const source = context.createBufferSource();
     const gain = context.createGain();
@@ -51,20 +67,21 @@ export class AudioEngine {
     source.start();
   }
 
-  private loadSpotlight(context: AudioContext): Promise<AudioBuffer | null> {
-    if (!this.spotlightBuffer) {
-      this.spotlightBuffer = (async () => {
-        try {
-          const response = await fetch('/sounds/gunshot.m4a');
-          if (!response.ok) throw new Error('Spotlight sound unavailable');
-          return await context.decodeAudioData(await response.arrayBuffer());
-        } catch {
-          this.spotlightBuffer = null;
-          return null;
-        }
-      })();
-    }
-    return this.spotlightBuffer;
+  private loadClip(context: AudioContext, path: string): Promise<AudioBuffer | null> {
+    const cached = this.clipBuffers.get(path);
+    if (cached) return cached;
+    const loaded = (async () => {
+      try {
+        const response = await fetch(path);
+        if (!response.ok) throw new Error('Sound unavailable');
+        return await context.decodeAudioData(await response.arrayBuffer());
+      } catch {
+        this.clipBuffers.delete(path);
+        return null;
+      }
+    })();
+    this.clipBuffers.set(path, loaded);
+    return loaded;
   }
 
   async playClick(postsPerSecond = 0, theme: SoundTheme = 'light'): Promise<void> {
