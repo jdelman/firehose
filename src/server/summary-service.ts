@@ -14,6 +14,7 @@ export type SummaryGenerator = (posts: SummaryPost[], sources?: SourceSamples) =
 const DEFAULT_INTERVAL_MS = 10_000;
 
 class SummaryQuotaError extends Error {}
+class SummaryResponseError extends Error {}
 
 export class ChannelSummaryService {
   private readonly intervalMs: number;
@@ -135,10 +136,11 @@ export class ChannelSummaryService {
       this.quotaBlocked = error instanceof SummaryQuotaError;
       const message =
         error instanceof Error ? error.message : 'Summary generation failed';
+      const keepPrevious = error instanceof SummaryResponseError && this.snapshot.updatedAt !== null;
       this.snapshot = {
         ...this.snapshot,
-        text: `Unavailable: ${message}`,
-        comparison: this.compareSources ? `Unavailable: ${message}` : undefined,
+        text: keepPrevious ? this.snapshot.text : `Unavailable: ${message}`,
+        comparison: keepPrevious ? this.snapshot.comparison : this.compareSources ? `Unavailable: ${message}` : undefined,
         status: 'error',
       };
       this.publishSnapshot();
@@ -154,6 +156,54 @@ export async function generateOpenRouterSummary(posts: SummaryPost[], sources?: 
     throw new Error('missing OPENROUTER_KEY');
   }
 
+  // Both attempts share a deadline so bad output cannot stall later windows.
+  const signal = AbortSignal.timeout(15_000);
+  try {
+    return await requestOpenRouterSummary(apiKey, posts, sources, signal, false);
+  } catch (error) {
+    if (!(error instanceof SummaryResponseError) || signal.aborted) throw error;
+    return requestOpenRouterSummary(apiKey, posts, sources, signal, true);
+  }
+}
+
+function summaryResponseFormat(compareSources: boolean) {
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: 'firehose_summary',
+      strict: true,
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['summary', 'keywords', 'spotlight_post_id', ...(compareSources ? ['comparison'] : [])],
+        properties: {
+          summary: { type: 'string' },
+          spotlight_post_id: { type: ['string', 'null'] },
+          keywords: {
+            type: 'array',
+            minItems: 10,
+            maxItems: 10,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['keyword', 'related'],
+              properties: {
+                keyword: { type: 'string' },
+                related: { type: 'array', minItems: 5, maxItems: 5, items: { type: 'string' } },
+              },
+            },
+          },
+          ...(compareSources ? { comparison: { type: 'string' } } : {}),
+        },
+      },
+    },
+  };
+}
+
+async function requestOpenRouterSummary(
+  apiKey: string, posts: SummaryPost[], sources: SourceSamples | undefined,
+  signal: AbortSignal, retry: boolean,
+): Promise<SummaryResult> {
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -177,9 +227,9 @@ export async function generateOpenRouterSummary(posts: SummaryPost[], sources?: 
         'The "summary" value must be one terse plain-text sentence under 200 characters about what people are talking about.',
         'The "spotlight_post_id" value must be the exact ID of the most off-kilter, bizarre, surprising, or offensive post in recent_posts, or null if no identified post is available.',
         'Return only its ID in spotlight_post_id. Do not include the selected ID, selection rationale, or a separate spotlight description in the summary or comparison.',
-        'The "keywords" value must be an object with exactly 10 keys.',
-        'Each key must be a short filter phrase, 1 to 3 words long, that sounds like something a user could enter into a social media firehose filter and actually match post text.',
-        'Each object value must be an array of exactly 5 other related search terms for that key.',
+        'The "keywords" value must be an array of exactly 10 objects, each with "keyword" and "related" fields.',
+        'Each keyword must be a short filter phrase, 1 to 3 words long, that sounds like something a user could enter into a social media firehose filter and actually match post text.',
+        'Each related field must be an array of exactly 5 other related search terms for that keyword.',
         'Prefer literal quoted phrases, slogans, names, nicknames, hashtags without the # symbol, chant-like fragments, and repeated word pairs taken from the kinds of language people are actually using.',
         'Do not use abstract topic labels or analyst summaries like "political outrage" or "economic anxiety" unless those exact words are likely to appear in posts.',
         'Do not include labels, markdown, or any extra text outside the JSON object.',
@@ -187,17 +237,19 @@ export async function generateOpenRouterSummary(posts: SummaryPost[], sources?: 
       reasoning: {
         effort: 'none',
       },
-      response_format: { type: 'json_object' },
-      max_tokens: sources ? 1_500 : 1_200,
+      response_format: summaryResponseFormat(Boolean(sources)),
+      provider: { require_parameters: true },
+      plugins: [{ id: 'response-healing' }],
+      max_tokens: retry ? 4_000 : sources ? 2_500 : 2_000,
     }),
-    signal: AbortSignal.timeout(15_000),
+    signal,
   });
 
   const data = (await response.json().catch(() => null)) as {
     error?: { code?: number; message?: string };
     choices?: Array<{
       finish_reason?: string;
-      message?: { content?: string | null };
+      message?: { content?: string | null; refusal?: string | null };
     }>;
   } | null;
 
@@ -218,8 +270,11 @@ export async function generateOpenRouterSummary(posts: SummaryPost[], sources?: 
   }
 
   const choice = data?.choices?.[0];
+  if (choice?.message?.refusal || choice?.finish_reason === 'content_filter') {
+    throw new Error('summary response was declined by the provider');
+  }
   if (choice?.finish_reason === 'length') {
-    throw new Error('summary response incomplete (output token limit reached)');
+    throw new SummaryResponseError('summary response incomplete (output token limit reached)');
   }
   const candidate = choice?.message?.content?.trim();
 
@@ -229,17 +284,29 @@ export async function generateOpenRouterSummary(posts: SummaryPost[], sources?: 
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'summary response was not valid JSON';
-      throw new Error(`summary response parse failed (${message})`);
+      throw new SummaryResponseError(`summary response parse failed (${message})`);
     }
   }
 
-  throw new Error('summary response had no text');
+  throw new SummaryResponseError('summary response had no text');
 }
 
 function parseSummaryResult(value: string, posts: SummaryPost[], expectComparison = false): SummaryResult {
-  const match = value.match(/\{[\s\S]*\}/);
-  const jsonText = match ? match[0] : value;
-  const parsed = JSON.parse(jsonText) as {
+  // Decode complete JSON before considering wrappers: extracting braces first
+  // corrupts JSON strings whose object quotes are escaped.
+  let decoded: unknown = value;
+  for (let depth = 0; depth < 3 && typeof decoded === 'string'; depth++) {
+    const candidate = decoded.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1');
+    try {
+      decoded = JSON.parse(candidate);
+    } catch {
+      throw new Error('invalid JSON');
+    }
+  }
+  if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
+    throw new Error('summary response must be a JSON object');
+  }
+  const parsed = decoded as {
     summary?: unknown;
     keywords?: unknown;
     comparison?: unknown;
@@ -272,13 +339,18 @@ function parseSummaryResult(value: string, posts: SummaryPost[], expectCompariso
 }
 
 function normalizeKeywordMap(value: unknown): Record<string, string[]> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!value || typeof value !== 'object') {
     return {};
   }
 
+  // Read the schema's fixed-shape entries and older keyword maps.
+  const keywordMap = Array.isArray(value)
+    ? Object.fromEntries(value.filter(entry => entry && typeof entry.keyword === 'string')
+      .map(entry => [entry.keyword, entry.related]))
+    : value;
   const normalizedEntries: Array<[string, string[]]> = [];
 
-  for (const [rawKeyword, rawRelated] of Object.entries(value)) {
+  for (const [rawKeyword, rawRelated] of Object.entries(keywordMap)) {
     const keyword = rawKeyword.trim();
     if (!keyword) {
       continue;

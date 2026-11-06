@@ -162,6 +162,8 @@ describe('OpenRouter summaries', () => {
     expect(JSON.parse(body.messages[1].content).comparison_samples).toEqual(samples);
     expect(body.messages[0].content).toContain('Do not invent');
     expect(body.messages[0].content).toContain('"comparison"');
+    expect(body.response_format.json_schema.schema.required).toContain('comparison');
+    expect(body.response_format.json_schema.schema.properties.comparison).toEqual({ type: 'string' });
   });
 
   test('rejects a missing comparison when both source samples are provided', async () => {
@@ -201,7 +203,87 @@ describe('OpenRouter summaries', () => {
     expect(JSON.parse(body.messages[1].content)).toEqual({ recent_posts: [
       { id: '0', text: 'Cats are great' }, { id: '1', text: 'I love kittens' },
     ] });
-    expect(body.response_format).toEqual({ type: 'json_object' });
+    expect(body.response_format.type).toBe('json_schema');
+    expect(body.response_format.json_schema.strict).toBe(true);
+    const schema = body.response_format.json_schema.schema;
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.required).toEqual(['summary', 'keywords', 'spotlight_post_id']);
+    expect(schema.properties.keywords.items.additionalProperties).toBe(false);
+    expect(schema.properties.keywords.items.required).toEqual(['keyword', 'related']);
+    expect(body.provider).toEqual({ require_parameters: true });
+    expect(body.plugins).toEqual([{ id: 'response-healing' }]);
+  });
+
+  test('decodes fenced and double-encoded JSON without stripping escaped quotes or braces', async () => {
+    const summary = { summary: 'People say "cats" and {kittens}.', keywords: { cats: ['a\\b', '"kittens"'] } };
+    const json = JSON.stringify(summary);
+    const requests = mockResponse({});
+    for (const content of [json, `\`\`\`json\n${json}\n\`\`\``, JSON.stringify(json), JSON.stringify(JSON.stringify(json))]) {
+      requests.mockImplementation(async () => Response.json({ choices: [{ message: { content } }] }));
+      expect(await summarize(['cats'])).toEqual({ text: summary.summary, keywords: summary.keywords });
+    }
+    expect(requests).toHaveBeenCalledTimes(4);
+  });
+
+  test('normalizes structured keyword entries for the existing keyword UI', async () => {
+    mockResponse({ choices: [{ message: { content: JSON.stringify({
+      summary: 'Cats.', keywords: [
+        { keyword: ' cats ', related: ['CATS', ' kittens ', 'Kittens', 'pets', 12] },
+        null, { keyword: '', related: [] },
+      ], spotlight_post_id: '0',
+    }) } }] });
+    expect(await summarize(['cats'])).toEqual({ text: 'Cats.', keywords: { cats: ['kittens', 'pets'] }, spotlightPostId: '0' });
+  });
+
+  test('retries malformed output once with more output room and the same deadline', async () => {
+    const requests = mockResponse({});
+    requests.mockImplementationOnce(async () => Response.json({ choices: [{ message: { content: '{\\"summary\\":' } }] }));
+    requests.mockImplementationOnce(async () => Response.json({ choices: [{ message: { content: JSON.stringify({ summary: 'Recovered.', keywords: [] }) } }] }));
+    expect((await summarize(['cats'])).text).toBe('Recovered.');
+    expect(requests).toHaveBeenCalledTimes(2);
+    const first = requests.mock.calls[0]![1]!;
+    const second = requests.mock.calls[1]![1]!;
+    expect(first.signal!).toBe(second.signal!);
+    expect(JSON.parse(second.body as string).max_tokens).toBeGreaterThan(JSON.parse(first.body as string).max_tokens);
+  });
+
+  test('retries truncated and empty responses but stops after two failed attempts', async () => {
+    const requests = mockResponse({ choices: [{ finish_reason: 'length', message: { content: '{}' } }] });
+    await expect(summarize(['cats'])).rejects.toThrow('output token limit');
+    expect(requests).toHaveBeenCalledTimes(2);
+    requests.mockClear();
+    requests.mockImplementation(async () => Response.json({ choices: [{ message: { content: null } }] }));
+    await expect(summarize(['cats'])).rejects.toThrow('no text');
+    expect(requests).toHaveBeenCalledTimes(2);
+    requests.mockClear();
+    requests.mockImplementation(async () => Response.json({ choices: [{ message: { content: 'null' } }] }));
+    await expect(summarize(['cats'])).rejects.toThrow('must be a JSON object');
+    expect(requests).toHaveBeenCalledTimes(2);
+  });
+
+  test('does not retry refusals or authentication errors', async () => {
+    const requests = mockResponse({ choices: [{ message: { refusal: 'Declined', content: null } }] });
+    await expect(summarize(['cats'])).rejects.toThrow('declined');
+    expect(requests).toHaveBeenCalledTimes(1);
+    requests.mockClear();
+    requests.mockImplementation(async () => Response.json({ error: { code: 401 } }, { status: 401 }));
+    await expect(summarize(['cats'])).rejects.toThrow('authentication');
+    expect(requests).toHaveBeenCalledTimes(1);
+  });
+
+  test('retains the last good summary, keywords, comparison, and timestamp after bad output', async () => {
+    const requests = mockResponse({ choices: [{ message: { content: JSON.stringify({
+      summary: 'Fresh summary', keywords: { cats: ['kittens'] }, comparison: 'Both discuss cats.',
+    }) } }] });
+    const service = new ChannelSummaryService({ generateSummary: generateOpenRouterSummary, compareSources: true, onUpdate() {} });
+    service.notePost('cats', 'bluesky');
+    service.notePost('cats', 'x');
+    await service.flush();
+    const good = service.getSnapshot();
+    requests.mockImplementation(async () => Response.json({ choices: [{ message: { content: 'broken' } }] }));
+    await service.flush();
+    expect(service.getSnapshot()).toEqual({ ...good, status: 'error' });
+    expect(requests).toHaveBeenCalledTimes(3);
   });
 
   test('selects a supplied post ID without adding it to displayed summary text', async () => {
