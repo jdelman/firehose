@@ -37,7 +37,15 @@ export class CrazyProgress {
 
   private render(): void {
     this.container.hidden = !this.enabled;
-    this.container.dataset.shaking = String(this.enabled && this.posts / this.target >= 0.9);
+    const fraction = this.posts / this.target;
+    const shaking = this.enabled && fraction > 0.25;
+    // Cubic acceleration keeps the early motion gentle and ramps up near full.
+    const intensity = Math.max(0, (fraction - 0.25) / 0.75) ** 3;
+    const frequency = 1 + 11 * intensity;
+    this.container.dataset.shaking = String(shaking);
+    this.container.style.setProperty('--shake-duration', `${1_000 / frequency}ms`);
+    this.container.style.setProperty('--shake-distance', `${1 + 3 * intensity}px`);
+    this.container.style.setProperty('--shake-angle', `${0.15 + 0.65 * intensity}deg`);
     this.bar.max = this.target;
     this.bar.value = this.posts;
     this.label.textContent = `${this.posts.toLocaleString('en-US')} / ${this.target.toLocaleString('en-US')} posts`;

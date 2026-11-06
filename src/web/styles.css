@@ -837,13 +837,13 @@ button, select, input, label {
 
 @keyframes crazy-progress-shake {
   0%, 100% { transform: translate(0, 0) rotate(0); }
-  25% { transform: translate(-2px, 1px) rotate(-0.5deg); }
-  50% { transform: translate(2px, -1px) rotate(0.5deg); }
-  75% { transform: translate(-1px, -1px) rotate(-0.5deg); }
+  25% { transform: translate(calc(-1 * var(--shake-distance)), calc(0.5 * var(--shake-distance))) rotate(calc(-1 * var(--shake-angle))); }
+  50% { transform: translate(var(--shake-distance), calc(-0.5 * var(--shake-distance))) rotate(var(--shake-angle)); }
+  75% { transform: translate(calc(-0.5 * var(--shake-distance)), calc(-0.5 * var(--shake-distance))) rotate(calc(-1 * var(--shake-angle))); }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .crazy-progress[data-shaking='true'] progress {
-    animation: crazy-progress-shake 180ms linear infinite;
+  .crazy-progress[data-shaking='true'] {
+    animation: crazy-progress-shake var(--shake-duration) linear infinite;
   }
 }
